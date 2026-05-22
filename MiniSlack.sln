@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniSlack.Api", "MiniSlack.Api\MiniSlack.Api.csproj", "{D0F21FC2-C2B8-4E86-9424-4B150A554648}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniSlack.Domain", "MiniSlack.Domain\MiniSlack.Domain.csproj", "{7474C00E-45DE-4508-853D-F4C18D250515}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniSlack.Application", "MiniSlack.Application\MiniSlack.Application.csproj", "{B9C6B941-1A6B-4EE9-8005-08AAD2CC4115}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniSlack.Infrastructure", "MiniSlack.Infrastructure\MiniSlack.Infrastructure.csproj", "{E5C0A221-FDAF-4925-A69E-2735BA9DCFE7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D0F21FC2-C2B8-4E86-9424-4B150A554648}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D0F21FC2-C2B8-4E86-9424-4B150A554648}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D0F21FC2-C2B8-4E86-9424-4B150A554648}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D0F21FC2-C2B8-4E86-9424-4B150A554648}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7474C00E-45DE-4508-853D-F4C18D250515}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7474C00E-45DE-4508-853D-F4C18D250515}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7474C00E-45DE-4508-853D-F4C18D250515}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7474C00E-45DE-4508-853D-F4C18D250515}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B9C6B941-1A6B-4EE9-8005-08AAD2CC4115}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9C6B941-1A6B-4EE9-8005-08AAD2CC4115}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9C6B941-1A6B-4EE9-8005-08AAD2CC4115}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9C6B941-1A6B-4EE9-8005-08AAD2CC4115}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5C0A221-FDAF-4925-A69E-2735BA9DCFE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5C0A221-FDAF-4925-A69E-2735BA9DCFE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5C0A221-FDAF-4925-A69E-2735BA9DCFE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5C0A221-FDAF-4925-A69E-2735BA9DCFE7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

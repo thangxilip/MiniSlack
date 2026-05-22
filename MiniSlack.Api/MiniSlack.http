@@ -1,0 +1,6 @@
+@MiniSlack_HostAddress = http://localhost:5023
+
+GET {{MiniSlack_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
