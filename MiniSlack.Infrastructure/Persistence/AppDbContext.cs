@@ -12,6 +12,8 @@ namespace MiniSlack.Infrastructure.Persistence;
 
 public sealed class AppDbContext : DbContext
 {
+    private readonly HashSet<BaseEntity> _hardDeletedEntities = [];
+
     public AppDbContext(DbContextOptions<AppDbContext> options)
         : base(options)
     {
@@ -57,6 +59,11 @@ public sealed class AppDbContext : DbContext
         return base.SaveChangesAsync(cancellationToken);
     }
 
+    public void MarkAsHardDeleted(BaseEntity entity)
+    {
+        _hardDeletedEntities.Add(entity);
+    }
+
     private void ApplyAuditInfo()
     {
         var utcNow = DateTimeOffset.UtcNow;
@@ -74,12 +81,19 @@ public sealed class AppDbContext : DbContext
                     break;
 
                 case EntityState.Deleted:
+                    if (_hardDeletedEntities.Contains(entry.Entity))
+                    {
+                        break;
+                    }
+
                     entry.State = EntityState.Modified;
                     entry.Entity.IsDeleted = true;
                     entry.Entity.DeletedAtUtc = utcNow;
                     break;
             }
         }
+
+        _hardDeletedEntities.Clear();
     }
 
     private static void ApplySoftDeleteQueryFilter(ModelBuilder modelBuilder)

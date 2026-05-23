@@ -16,6 +16,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\MiniSlack.Application\MiniSlack.Application.csproj" />
         <ProjectReference Include="..\MiniSlack.Domain\MiniSlack.Domain.csproj" />
     </ItemGroup>
 
