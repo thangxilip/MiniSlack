@@ -167,7 +167,7 @@ app.MapPost("/auth/refresh", async (
     var authResult = await authService.RefreshAsync(refreshToken, cancellationToken);
     if (authResult is null)
     {
-        httpContext.Response.Cookies.Delete(cookieName);
+        ClearRefreshTokenCookie(httpContext, options.Value);
         return Results.Unauthorized();
     }
 
@@ -192,7 +192,7 @@ app.MapPost("/auth/logout", async (
         await authService.RevokeRefreshTokenAsync(refreshToken, cancellationToken);
     }
 
-    httpContext.Response.Cookies.Delete(cookieName);
+    ClearRefreshTokenCookie(httpContext, options.Value);
     return Results.NoContent();
 });
 
@@ -267,9 +267,24 @@ static void SetRefreshTokenCookie(
         new CookieOptions
         {
             HttpOnly = true,
-            Secure = httpContext.Request.IsHttps,
-            SameSite = SameSiteMode.Lax,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Path = "/",
             Expires = DateTimeOffset.UtcNow.AddDays(options.RefreshTokens.Days)
+        });
+}
+
+static void ClearRefreshTokenCookie(
+    HttpContext httpContext,
+    AuthOptions options)
+{
+    httpContext.Response.Cookies.Delete(
+        options.RefreshTokens.CookieName,
+        new CookieOptions
+        {
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Path = "/"
         });
 }
 
