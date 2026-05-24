@@ -10,7 +10,11 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
     {
         builder.ToTable("users");
 
-        builder.Property(user => user.GoogleId)
+        builder.Property(user => user.IdentityProvider)
+            .HasMaxLength(64)
+            .IsRequired();
+
+        builder.Property(user => user.ExternalId)
             .HasMaxLength(128)
             .IsRequired();
 
@@ -28,7 +32,7 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.Status)
             .HasMaxLength(160);
 
-        builder.HasIndex(user => user.GoogleId)
+        builder.HasIndex(user => new { user.IdentityProvider, user.ExternalId })
             .IsUnique();
 
         builder.HasIndex(user => user.Email)
