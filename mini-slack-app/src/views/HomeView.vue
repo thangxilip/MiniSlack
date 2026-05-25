@@ -1,9 +1,29 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Bell, MessageSquareText } from 'lucide-vue-next'
+import ActivityPanel from '@/components/dashboard/ActivityPanel.vue'
+import ConversationPanel from '@/components/dashboard/ConversationPanel.vue'
+import UserMenu from '@/components/dashboard/UserMenu.vue'
+import WorkspaceSidebar from '@/components/dashboard/WorkspaceSidebar.vue'
+import Button from '@/components/ui/Button.vue'
+import { channels, directMessages, messagesByChannel } from '@/lib/dashboard-data'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const activeChannelId = ref(channels[0]?.id ?? 'general')
+const sidebarOpen = ref(false)
+
+const activeChannel = computed(
+  () => channels.find((channel) => channel.id === activeChannelId.value) ?? channels[0],
+)
+const activeMessages = computed(() => messagesByChannel[activeChannelId.value] ?? [])
+
+function selectChannel(id: string) {
+  activeChannelId.value = id
+  sidebarOpen.value = false
+}
 
 async function logout() {
   await auth.logout()
@@ -12,99 +32,54 @@ async function logout() {
 </script>
 
 <template>
-  <main class="home-view">
-    <header class="topbar">
-      <strong>MiniSlack</strong>
-      <button type="button" class="ghost-action" :disabled="auth.loading" @click="logout">Sign out</button>
-    </header>
+  <main class="flex h-screen overflow-hidden bg-slate-100 text-slate-950">
+    <div
+      v-if="sidebarOpen"
+      class="fixed inset-0 z-30 bg-slate-950/30 lg:hidden"
+      aria-hidden="true"
+      @click="sidebarOpen = false"
+    />
 
-    <section class="workspace">
-      <div class="profile">
-        <img v-if="auth.user?.avatarUrl" :src="auth.user.avatarUrl" alt="" />
-        <div v-else class="avatar-fallback">{{ auth.user?.displayName?.charAt(0) ?? 'M' }}</div>
-        <div>
-          <h1>{{ auth.user?.displayName }}</h1>
-          <p>{{ auth.user?.email }}</p>
+    <WorkspaceSidebar
+      :channels="channels"
+      :direct-messages="directMessages"
+      :active-channel-id="activeChannelId"
+      :open="sidebarOpen"
+      @select-channel="selectChannel"
+      @close="sidebarOpen = false"
+    />
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header
+        class="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4"
+      >
+        <div class="flex min-w-0 items-center gap-3">
+          <div class="grid h-9 w-9 place-items-center rounded-md bg-emerald-700 text-white">
+            <MessageSquareText class="h-5 w-5" />
+          </div>
+          <div class="min-w-0">
+            <p class="truncate text-sm font-bold text-slate-950">MiniSlack Dashboard</p>
+            <p class="truncate text-xs text-slate-500">Team chat workspace</p>
+          </div>
         </div>
+
+        <div class="flex items-center gap-1 sm:gap-2">
+          <Button variant="ghost" size="icon" aria-label="Notifications">
+            <Bell class="h-5 w-5" />
+          </Button>
+          <UserMenu :user="auth.user" :loading="auth.loading" @logout="logout" />
+        </div>
+      </header>
+
+      <div class="flex min-h-0 flex-1">
+        <ConversationPanel
+          v-if="activeChannel"
+          :channel="activeChannel"
+          :messages="activeMessages"
+          @open-sidebar="sidebarOpen = true"
+        />
+        <ActivityPanel />
       </div>
-    </section>
+    </div>
   </main>
 </template>
-
-<style scoped>
-.home-view {
-  min-height: 100vh;
-  background: #f7f8fb;
-  color: #1f2430;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 64px;
-  padding: 0 24px;
-  border-bottom: 1px solid #dfe3ec;
-  background: #ffffff;
-}
-
-.ghost-action {
-  min-height: 36px;
-  border: 1px solid #c9d1df;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #1f2430;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.ghost-action:disabled {
-  cursor: wait;
-  opacity: 0.68;
-}
-
-.workspace {
-  width: min(100% - 32px, 960px);
-  margin: 40px auto;
-}
-
-.profile {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 24px;
-  border: 1px solid #dfe3ec;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-img,
-.avatar-fallback {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-}
-
-img {
-  object-fit: cover;
-}
-
-.avatar-fallback {
-  display: grid;
-  place-items: center;
-  background: #1f7a5c;
-  color: #ffffff;
-  font-weight: 800;
-}
-
-h1 {
-  margin: 0 0 4px;
-  font-size: 1.35rem;
-}
-
-p {
-  margin: 0;
-  color: #5d6878;
-}
-</style>
