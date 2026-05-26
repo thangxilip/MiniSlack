@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using MiniSlack.Application;
 using MiniSlack.Application.Auth;
 using MiniSlack.Endpoints;
 using MiniSlack.Infrastructure;
@@ -22,6 +23,7 @@ var authOptions = builder.Configuration
     .GetSection(AuthOptions.SectionName)
     .Get<AuthOptions>() ?? new AuthOptions();
 
+builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

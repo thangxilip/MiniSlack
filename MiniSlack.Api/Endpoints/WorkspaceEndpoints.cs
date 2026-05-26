@@ -1,7 +1,14 @@
 using System.Security.Claims;
+using MediatR;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using MiniSlack.Application.Workspaces;
+using MiniSlack.Application.Workspaces.Commands.CreateConversation;
+using MiniSlack.Application.Workspaces.Commands.CreateMessage;
+using MiniSlack.Application.Workspaces.Commands.CreateWorkspace;
+using MiniSlack.Application.Workspaces.Queries.GetConversations;
+using MiniSlack.Application.Workspaces.Queries.GetMessages;
+using MiniSlack.Application.Workspaces.Queries.GetWorkspaces;
 
 namespace MiniSlack.Endpoints;
 
@@ -46,7 +53,7 @@ public static class WorkspaceEndpoints
 
     private static async Task<Results<Ok<IReadOnlyList<WorkspaceSummary>>, UnauthorizedHttpResult>> GetWorkspacesAsync(
         ClaimsPrincipal user,
-        IWorkspaceService workspaceService,
+        ISender sender,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(user, out var userId))
@@ -54,14 +61,14 @@ public static class WorkspaceEndpoints
             return TypedResults.Unauthorized();
         }
 
-        var workspaces = await workspaceService.GetWorkspacesAsync(userId, cancellationToken);
+        var workspaces = await sender.Send(new GetWorkspacesQuery(userId), cancellationToken);
         return TypedResults.Ok(workspaces);
     }
 
     private static async Task<Results<Created<WorkspaceSummary>, BadRequest<ProblemDetails>, UnauthorizedHttpResult>> CreateWorkspaceAsync(
         ClaimsPrincipal user,
         CreateWorkspaceRequest request,
-        IWorkspaceService workspaceService,
+        ISender sender,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(user, out var userId))
@@ -71,7 +78,7 @@ public static class WorkspaceEndpoints
 
         try
         {
-            var workspace = await workspaceService.CreateWorkspaceAsync(userId, request, cancellationToken);
+            var workspace = await sender.Send(new CreateWorkspaceCommand(userId, request), cancellationToken);
             return TypedResults.Created($"/workspaces/{workspace.Id}", workspace);
         }
         catch (ArgumentException exception)
@@ -83,7 +90,7 @@ public static class WorkspaceEndpoints
     private static async Task<Results<Ok<IReadOnlyList<ConversationSummary>>, NotFound, UnauthorizedHttpResult>> GetConversationsAsync(
         Guid workspaceId,
         ClaimsPrincipal user,
-        IWorkspaceService workspaceService,
+        ISender sender,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(user, out var userId))
@@ -93,7 +100,7 @@ public static class WorkspaceEndpoints
 
         try
         {
-            var conversations = await workspaceService.GetConversationsAsync(userId, workspaceId, cancellationToken);
+            var conversations = await sender.Send(new GetConversationsQuery(userId, workspaceId), cancellationToken);
             return TypedResults.Ok(conversations);
         }
         catch (UnauthorizedAccessException)
@@ -106,7 +113,7 @@ public static class WorkspaceEndpoints
         Guid workspaceId,
         ClaimsPrincipal user,
         CreateConversationRequest request,
-        IWorkspaceService workspaceService,
+        ISender sender,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(user, out var userId))
@@ -116,7 +123,9 @@ public static class WorkspaceEndpoints
 
         try
         {
-            var conversation = await workspaceService.CreateConversationAsync(userId, workspaceId, request, cancellationToken);
+            var conversation = await sender.Send(
+                new CreateConversationCommand(userId, workspaceId, request),
+                cancellationToken);
             return TypedResults.Created($"/conversations/{conversation.Id}", conversation);
         }
         catch (ArgumentException exception)
@@ -138,7 +147,7 @@ public static class WorkspaceEndpoints
         DateTimeOffset? before,
         int? limit,
         ClaimsPrincipal user,
-        IWorkspaceService workspaceService,
+        ISender sender,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(user, out var userId))
@@ -148,11 +157,12 @@ public static class WorkspaceEndpoints
 
         try
         {
-            var messages = await workspaceService.GetMessagesAsync(
-                userId,
-                conversationId,
-                before,
-                limit ?? 50,
+            var messages = await sender.Send(
+                new GetMessagesQuery(
+                    userId,
+                    conversationId,
+                    before,
+                    limit ?? 50),
                 cancellationToken);
 
             return TypedResults.Ok(messages);
@@ -167,7 +177,7 @@ public static class WorkspaceEndpoints
         Guid conversationId,
         ClaimsPrincipal user,
         CreateMessageRequest request,
-        IWorkspaceService workspaceService,
+        ISender sender,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(user, out var userId))
@@ -177,7 +187,7 @@ public static class WorkspaceEndpoints
 
         try
         {
-            var message = await workspaceService.CreateMessageAsync(userId, conversationId, request, cancellationToken);
+            var message = await sender.Send(new CreateMessageCommand(userId, conversationId, request), cancellationToken);
             return TypedResults.Created($"/conversations/{conversationId}/messages/{message.Id}", message);
         }
         catch (ArgumentException exception)

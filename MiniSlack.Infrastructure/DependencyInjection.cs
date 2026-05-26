@@ -3,11 +3,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniSlack.Application.Auth;
 using MiniSlack.Application.Common.Persistence;
+using MiniSlack.Application.Workspaces.Abstractions;
 using MiniSlack.Infrastructure.Auth;
 using MiniSlack.Infrastructure.Persistence;
 using MiniSlack.Infrastructure.Persistence.Repositories;
-using MiniSlack.Infrastructure.Workspaces;
-using MiniSlack.Application.Workspaces;
+using MiniSlack.Infrastructure.Workspaces.Stores;
 
 namespace MiniSlack.Infrastructure;
 
@@ -29,7 +29,8 @@ public static class DependencyInjection
         services.Configure<AuthOptions>(configuration.GetSection(AuthOptions.SectionName));
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IAuthService, AuthService>();
-        services.AddScoped<IWorkspaceService, WorkspaceService>();
+        services.AddScoped<IWorkspaceCommandStore, WorkspaceCommandStore>();
+        services.AddScoped<IWorkspaceReadStore, WorkspaceReadStore>();
 
         return services;
     }

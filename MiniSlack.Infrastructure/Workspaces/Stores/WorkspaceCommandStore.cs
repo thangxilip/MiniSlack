@@ -1,45 +1,51 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using MiniSlack.Application.Workspaces;
+using MiniSlack.Application.Workspaces.Abstractions;
 using MiniSlack.Domain.Conversations;
 using MiniSlack.Domain.Messages;
 using MiniSlack.Domain.Workspaces;
 using MiniSlack.Infrastructure.Persistence;
 
-namespace MiniSlack.Infrastructure.Workspaces;
+namespace MiniSlack.Infrastructure.Workspaces.Stores;
 
-public sealed partial class WorkspaceService : IWorkspaceService
+public sealed partial class WorkspaceCommandStore : IWorkspaceCommandStore
 {
-    private const int MaxMessagePageSize = 100;
     private readonly AppDbContext _dbContext;
 
-    public WorkspaceService(AppDbContext dbContext)
+    public WorkspaceCommandStore(AppDbContext dbContext)
     {
         _dbContext = dbContext;
     }
 
-    public async Task<IReadOnlyList<WorkspaceSummary>> GetWorkspacesAsync(
+    public async Task EnsureDefaultWorkspaceAsync(
         Guid userId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        await EnsureDefaultWorkspaceAsync(userId, cancellationToken);
+        var hasWorkspace = await _dbContext.WorkspaceMembers.AnyAsync(
+            member => member.UserId == userId,
+            cancellationToken);
 
-        return await _dbContext.WorkspaceMembers
+        if (hasWorkspace)
+        {
+            return;
+        }
+
+        var user = await _dbContext.Users
             .AsNoTracking()
-            .Where(member => member.UserId == userId)
-            .OrderBy(member => member.Workspace!.Name)
-            .Select(member => new WorkspaceSummary(
-                member.WorkspaceId,
-                member.Workspace!.Name,
-                member.Workspace.Slug,
-                member.Role))
-            .ToListAsync(cancellationToken);
+            .SingleOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Current user was not found.");
+
+        await CreateWorkspaceAsync(
+            userId,
+            new CreateWorkspaceRequest($"{user.DisplayName}'s Workspace"),
+            cancellationToken);
     }
 
     public async Task<WorkspaceSummary> CreateWorkspaceAsync(
         Guid userId,
         CreateWorkspaceRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         var name = NormalizeRequiredText(request.Name, 120, "Workspace name is required.");
         var workspace = new Workspace
@@ -72,36 +78,11 @@ public sealed partial class WorkspaceService : IWorkspaceService
         return new WorkspaceSummary(workspace.Id, workspace.Name, workspace.Slug, workspaceMember.Role);
     }
 
-    public async Task<IReadOnlyList<ConversationSummary>> GetConversationsAsync(
-        Guid userId,
-        Guid workspaceId,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureWorkspaceMemberAsync(userId, workspaceId, cancellationToken);
-
-        return await _dbContext.Conversations
-            .AsNoTracking()
-            .Where(conversation => conversation.WorkspaceId == workspaceId
-                && conversation.Members.Any(member => member.UserId == userId))
-            .OrderBy(conversation => conversation.Type)
-            .ThenBy(conversation => conversation.Name)
-            .Select(conversation => new ConversationSummary(
-                conversation.Id,
-                conversation.WorkspaceId,
-                conversation.Type,
-                conversation.Name ?? "direct message",
-                conversation.Description,
-                conversation.IsPrivate,
-                conversation.Members.Count,
-                conversation.CreatedAtUtc))
-            .ToListAsync(cancellationToken);
-    }
-
     public async Task<ConversationSummary> CreateConversationAsync(
         Guid userId,
         Guid workspaceId,
         CreateConversationRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         await EnsureWorkspaceMemberAsync(userId, workspaceId, cancellationToken);
 
@@ -155,49 +136,11 @@ public sealed partial class WorkspaceService : IWorkspaceService
             conversation.CreatedAtUtc);
     }
 
-    public async Task<IReadOnlyList<MessageSummary>> GetMessagesAsync(
-        Guid userId,
-        Guid conversationId,
-        DateTimeOffset? before,
-        int limit,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureConversationMemberAsync(userId, conversationId, cancellationToken);
-
-        var pageSize = Math.Clamp(limit, 1, MaxMessagePageSize);
-        var query = _dbContext.Messages
-            .AsNoTracking()
-            .Where(message => message.ConversationId == conversationId);
-
-        if (before is not null)
-        {
-            query = query.Where(message => message.CreatedAtUtc < before);
-        }
-
-        var messages = await query
-            .OrderByDescending(message => message.CreatedAtUtc)
-            .Take(pageSize)
-            .Select(message => new MessageSummary(
-                message.Id,
-                message.ConversationId,
-                message.SenderId,
-                message.Sender!.DisplayName,
-                message.Sender.AvatarUrl,
-                message.Content,
-                message.Type,
-                message.CreatedAtUtc,
-                message.EditedAtUtc))
-            .ToListAsync(cancellationToken);
-
-        messages.Reverse();
-        return messages;
-    }
-
     public async Task<MessageSummary> CreateMessageAsync(
         Guid userId,
         Guid conversationId,
         CreateMessageRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         await EnsureConversationMemberAsync(userId, conversationId, cancellationToken);
 
@@ -247,30 +190,6 @@ public sealed partial class WorkspaceService : IWorkspaceService
             message.Type,
             message.CreatedAtUtc,
             message.EditedAtUtc);
-    }
-
-    private async Task EnsureDefaultWorkspaceAsync(
-        Guid userId,
-        CancellationToken cancellationToken)
-    {
-        var hasWorkspace = await _dbContext.WorkspaceMembers.AnyAsync(
-            member => member.UserId == userId,
-            cancellationToken);
-
-        if (hasWorkspace)
-        {
-            return;
-        }
-
-        var user = await _dbContext.Users
-            .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken)
-            ?? throw new UnauthorizedAccessException("Current user was not found.");
-
-        await CreateWorkspaceAsync(
-            userId,
-            new CreateWorkspaceRequest($"{user.DisplayName}'s Workspace"),
-            cancellationToken);
     }
 
     private async Task EnsureWorkspaceMemberAsync(
