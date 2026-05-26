@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MiniSlack.Application.Auth;
+using MiniSlack.Endpoints;
 using MiniSlack.Infrastructure;
 using MiniSlack.Infrastructure.Auth;
 
@@ -104,6 +106,10 @@ builder.Services.AddAuthentication(options =>
     });
 
 builder.Services.AddAuthorization();
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 var app = builder.Build();
 
@@ -205,6 +211,8 @@ app.MapGet("/auth/me", async (
         return profile is null ? Results.NotFound() : Results.Ok(profile);
     })
     .RequireAuthorization();
+
+app.MapWorkspaceEndpoints();
 
 app.MapGet("/weatherforecast", () =>
     {

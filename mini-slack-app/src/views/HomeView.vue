@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, MessageSquareText } from 'lucide-vue-next'
 import ActivityPanel from '@/components/dashboard/ActivityPanel.vue'
@@ -7,26 +7,51 @@ import ConversationPanel from '@/components/dashboard/ConversationPanel.vue'
 import UserMenu from '@/components/dashboard/UserMenu.vue'
 import WorkspaceSidebar from '@/components/dashboard/WorkspaceSidebar.vue'
 import Button from '@/components/ui/Button.vue'
-import { channels, directMessages, messagesByChannel } from '@/lib/dashboard-data'
 import { useAuthStore } from '@/stores/auth'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const auth = useAuthStore()
+const workspace = useWorkspaceStore()
 const router = useRouter()
-const activeChannelId = ref(channels[0]?.id ?? 'general')
 const sidebarOpen = ref(false)
 
-const activeChannel = computed(
-  () => channels.find((channel) => channel.id === activeChannelId.value) ?? channels[0],
-)
-const activeMessages = computed(() => messagesByChannel[activeChannelId.value] ?? [])
+onMounted(() => {
+  if (auth.accessToken) {
+    workspace.loadDashboard(auth.accessToken)
+  }
+})
 
-function selectChannel(id: string) {
-  activeChannelId.value = id
+watch(
+  () => auth.accessToken,
+  (accessToken) => {
+    if (accessToken) {
+      workspace.loadDashboard(accessToken)
+    } else {
+      workspace.clear()
+    }
+  },
+)
+
+async function selectChannel(id: string) {
+  if (!auth.accessToken) {
+    return
+  }
+
+  await workspace.selectConversation(auth.accessToken, id)
   sidebarOpen.value = false
+}
+
+async function sendMessage(content: string) {
+  if (!auth.accessToken) {
+    return
+  }
+
+  await workspace.sendMessage(auth.accessToken, content)
 }
 
 async function logout() {
   await auth.logout()
+  workspace.clear()
   await router.replace({ name: 'login' })
 }
 </script>
@@ -41,9 +66,9 @@ async function logout() {
     />
 
     <WorkspaceSidebar
-      :channels="channels"
-      :direct-messages="directMessages"
-      :active-channel-id="activeChannelId"
+      :workspace-name="workspace.activeWorkspace?.name"
+      :channels="workspace.channels"
+      :active-channel-id="workspace.activeConversationId ?? ''"
       :open="sidebarOpen"
       @select-channel="selectChannel"
       @close="sidebarOpen = false"
@@ -73,11 +98,18 @@ async function logout() {
 
       <div class="flex min-h-0 flex-1">
         <ConversationPanel
-          v-if="activeChannel"
-          :channel="activeChannel"
-          :messages="activeMessages"
+          v-if="workspace.activeChannel"
+          :channel="workspace.activeChannel"
+          :messages="workspace.activeMessages"
+          :sending="workspace.sending"
           @open-sidebar="sidebarOpen = true"
+          @send-message="sendMessage"
         />
+        <section v-else class="flex min-w-0 flex-1 items-center justify-center bg-white p-6">
+          <p class="text-sm text-slate-500">
+            {{ workspace.loading ? 'Loading workspace...' : 'No channels found.' }}
+          </p>
+        </section>
         <ActivityPanel />
       </div>
     </div>

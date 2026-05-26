@@ -2,15 +2,17 @@
 import { computed, ref } from 'vue'
 import { Hash, Info, LockKeyhole, Menu, Paperclip, SendHorizontal, Smile } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
-import type { DashboardChannel, DashboardMessage } from '@/lib/dashboard-data'
+import type { WorkspaceChannel, WorkspaceMessage } from '@/stores/workspace'
 
 const props = defineProps<{
-  channel: DashboardChannel
-  messages: DashboardMessage[]
+  channel: WorkspaceChannel
+  messages: WorkspaceMessage[]
+  sending: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   openSidebar: []
+  sendMessage: [content: string]
 }>()
 
 const draft = ref('')
@@ -18,6 +20,11 @@ const draft = ref('')
 const channelLabel = computed(() => `#${props.channel.name}`)
 
 function sendMessage() {
+  if (!draft.value.trim()) {
+    return
+  }
+
+  emit('sendMessage', draft.value.trim())
   draft.value = ''
 }
 </script>
@@ -40,7 +47,8 @@ function sendMessage() {
         <div class="min-w-0">
           <h1 class="truncate text-base font-bold text-slate-950">{{ channel.name }}</h1>
           <p class="truncate text-xs text-slate-500">
-            23 members · Workspace updates and team discussions
+            {{ channel.memberCount }} member{{ channel.memberCount === 1 ? '' : 's' }}
+            <span v-if="channel.description"> · {{ channel.description }}</span>
           </p>
         </div>
       </div>
@@ -54,8 +62,7 @@ function sendMessage() {
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
           <p class="text-sm font-semibold text-slate-950">{{ channelLabel }}</p>
           <p class="mt-1 text-sm leading-6 text-slate-600">
-            This is the start of the {{ channel.name }} channel. Messages here are mocked for the
-            first dashboard UI pass.
+            This is the start of the {{ channel.name }} channel.
           </p>
         </div>
 
@@ -96,9 +103,9 @@ function sendMessage() {
               <Smile class="h-4 w-4" />
             </Button>
           </div>
-          <Button size="sm" :disabled="!draft.trim()">
+          <Button size="sm" :disabled="!draft.trim() || sending">
             <SendHorizontal class="h-4 w-4" />
-            Send
+            {{ sending ? 'Sending' : 'Send' }}
           </Button>
         </div>
       </form>

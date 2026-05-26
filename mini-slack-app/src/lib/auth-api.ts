@@ -1,53 +1,40 @@
+import { apiBaseUrl, apiClient } from '@/lib/api-client'
+import type { components } from '@/lib/generated/api-schema'
+
 export interface AuthResponse {
   accessToken: string
   expiresInSeconds: number
 }
 
-export interface UserProfile {
-  id: string
-  email: string
-  displayName: string
-  avatarUrl?: string | null
-  status?: string | null
-}
-
-export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'https://localhost:7006'
+export type UserProfile = components['schemas']['UserProfile']
 
 export function loginWithGoogle() {
   window.location.href = `${apiBaseUrl}/auth/login/google`
 }
 
 export async function refreshAccessToken(): Promise<AuthResponse | null> {
-  const response = await fetch(`${apiBaseUrl}/auth/refresh`, {
-    method: 'POST',
-    credentials: 'include',
-  })
-
-  if (!response.ok) {
+  const { data } = await apiClient.POST('/auth/refresh')
+  if (!data) {
     return null
   }
 
-  return response.json()
+  return data
 }
 
 export async function revokeSession() {
-  await fetch(`${apiBaseUrl}/auth/logout`, {
-    method: 'POST',
-    credentials: 'include',
-  })
+  await apiClient.POST('/auth/logout')
 }
 
 export async function getCurrentUser(accessToken: string): Promise<UserProfile> {
-  const response = await fetch(`${apiBaseUrl}/auth/me`, {
+  const { data } = await apiClient.GET('/auth/me', {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
-    credentials: 'include',
   })
 
-  if (!response.ok) {
+  if (!data) {
     throw new Error('Unable to load the current user.')
   }
 
-  return response.json()
+  return data
 }

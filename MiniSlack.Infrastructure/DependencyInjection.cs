@@ -6,6 +6,8 @@ using MiniSlack.Application.Common.Persistence;
 using MiniSlack.Infrastructure.Auth;
 using MiniSlack.Infrastructure.Persistence;
 using MiniSlack.Infrastructure.Persistence.Repositories;
+using MiniSlack.Infrastructure.Workspaces;
+using MiniSlack.Application.Workspaces;
 
 namespace MiniSlack.Infrastructure;
 
@@ -27,6 +29,7 @@ public static class DependencyInjection
         services.Configure<AuthOptions>(configuration.GetSection(AuthOptions.SectionName));
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IWorkspaceService, WorkspaceService>();
 
         return services;
     }
