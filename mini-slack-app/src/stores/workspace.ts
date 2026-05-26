@@ -1,11 +1,14 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { apiClient } from '@/lib/api-client'
-import type { components } from '@/lib/generated/api-schema'
-
-type WorkspaceSummary = components['schemas']['WorkspaceSummary']
-type ConversationSummary = components['schemas']['ConversationSummary']
-type MessageSummary = components['schemas']['MessageSummary']
+import {
+  createConversationMessage,
+  getConversationMessages,
+  getWorkspaceConversations,
+  getWorkspaces,
+  type ConversationSummary,
+  type MessageSummary,
+  type WorkspaceSummary,
+} from '@/lib/workspace-api'
 
 export interface WorkspaceChannel {
   id: string
@@ -16,12 +19,21 @@ export interface WorkspaceChannel {
   description?: string | null
 }
 
+export interface WorkspaceDirectMessage {
+  id: string
+  name: string
+  unread: number
+  memberCount: number
+}
+
 export interface WorkspaceMessage {
   id: string
   author: string
-  avatar: string
+  avatar: string | null
+  initials: string
   time: string
   body: string
+  edited: boolean
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -31,6 +43,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeWorkspaceId = ref<string | null>(null)
   const activeConversationId = ref<string | null>(null)
   const loading = ref(false)
+  const loadingMessages = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
 
@@ -51,17 +64,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })),
   )
 
-  const activeChannel = computed(
-    () => channels.value.find((channel) => channel.id === activeConversationId.value) ?? null,
+  const directMessages = computed<WorkspaceDirectMessage[]>(() =>
+    conversations.value
+      .filter((conversation) => conversation.type === 'Direct')
+      .map((conversation) => ({
+        id: conversation.id,
+        name: conversation.name,
+        unread: 0,
+        memberCount: conversation.memberCount,
+      })),
   )
+
+  const activeConversation = computed(
+    () =>
+      conversations.value.find((conversation) => conversation.id === activeConversationId.value) ??
+      null,
+  )
+
+  const activeChannel = computed(() => {
+    const conversation = activeConversation.value
+    if (!conversation) {
+      return null
+    }
+
+    return {
+      id: conversation.id,
+      name: conversation.name,
+      unread: 0,
+      isPrivate: conversation.isPrivate,
+      memberCount: conversation.memberCount,
+      description: conversation.description,
+    }
+  })
 
   const activeMessages = computed<WorkspaceMessage[]>(() =>
     messages.value.map((message) => ({
       id: message.id,
       author: message.senderDisplayName,
-      avatar: initials(message.senderDisplayName),
+      avatar: message.senderAvatarUrl ?? null,
+      initials: initials(message.senderDisplayName),
       time: formatMessageTime(message.createdAtUtc),
       body: message.content,
+      edited: Boolean(message.editedAtUtc),
     })),
   )
 
@@ -70,16 +114,49 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     error.value = null
 
     try {
-      const { data: loadedWorkspaces } = await apiClient.GET('/workspaces', {
-        headers: authHeaders(accessToken),
-      })
-
-      workspaces.value = loadedWorkspaces ?? []
-      activeWorkspaceId.value = activeWorkspaceId.value ?? workspaces.value[0]?.id ?? null
+      workspaces.value = await getWorkspaces(accessToken)
+      activeWorkspaceId.value = resolveWorkspaceId(activeWorkspaceId.value)
 
       if (activeWorkspaceId.value) {
         await loadConversations(accessToken, activeWorkspaceId.value)
+      } else {
+        conversations.value = []
+        messages.value = []
+        activeConversationId.value = null
       }
+    } catch {
+      error.value = 'Unable to load workspace data.'
+      conversations.value = []
+      messages.value = []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadConversations(accessToken: string, workspaceId: string) {
+    conversations.value = await getWorkspaceConversations(accessToken, workspaceId)
+    activeConversationId.value = resolveConversationId(activeConversationId.value)
+
+    if (activeConversationId.value) {
+      await loadMessages(accessToken, activeConversationId.value)
+    } else {
+      messages.value = []
+    }
+  }
+
+  async function selectWorkspace(accessToken: string, workspaceId: string) {
+    if (workspaceId === activeWorkspaceId.value) {
+      return
+    }
+
+    activeWorkspaceId.value = workspaceId
+    activeConversationId.value = null
+    messages.value = []
+    loading.value = true
+    error.value = null
+
+    try {
+      await loadConversations(accessToken, workspaceId)
     } catch {
       error.value = 'Unable to load workspace data.'
     } finally {
@@ -87,43 +164,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function loadConversations(accessToken: string, workspaceId: string) {
-    const { data } = await apiClient.GET('/workspaces/{workspaceId}/conversations', {
-      params: {
-        path: {
-          workspaceId,
-        },
-      },
-      headers: authHeaders(accessToken),
-    })
-
-    conversations.value = data ?? []
-    activeConversationId.value = activeConversationId.value ?? channels.value[0]?.id ?? null
-
-    if (activeConversationId.value) {
-      await loadMessages(accessToken, activeConversationId.value)
-    }
-  }
-
   async function selectConversation(accessToken: string, conversationId: string) {
+    if (conversationId === activeConversationId.value) {
+      return
+    }
+
     activeConversationId.value = conversationId
     await loadMessages(accessToken, conversationId)
   }
 
   async function loadMessages(accessToken: string, conversationId: string) {
-    const { data } = await apiClient.GET('/conversations/{conversationId}/messages', {
-      params: {
-        path: {
-          conversationId,
-        },
-        query: {
-          limit: 50,
-        },
-      },
-      headers: authHeaders(accessToken),
-    })
+    loadingMessages.value = true
+    error.value = null
 
-    messages.value = data ?? []
+    try {
+      messages.value = await getConversationMessages(accessToken, conversationId)
+    } catch {
+      error.value = 'Unable to load messages.'
+      messages.value = []
+    } finally {
+      loadingMessages.value = false
+    }
   }
 
   async function sendMessage(accessToken: string, content: string) {
@@ -135,22 +196,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sending.value = true
 
     try {
-      const { data } = await apiClient.POST('/conversations/{conversationId}/messages', {
-        params: {
-          path: {
-            conversationId,
-          },
-        },
-        body: {
-          content,
-          parentMessageId: null,
-        },
-        headers: authHeaders(accessToken),
-      })
-
-      if (data) {
-        messages.value = [...messages.value, data]
-      }
+      const message = await createConversationMessage(accessToken, conversationId, content.trim())
+      messages.value = [...messages.value, message]
+      error.value = null
+    } catch {
+      error.value = 'Unable to send message.'
     } finally {
       sending.value = false
     }
@@ -163,6 +213,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeWorkspaceId.value = null
     activeConversationId.value = null
     error.value = null
+    loading.value = false
+    loadingMessages.value = false
+    sending.value = false
+  }
+
+  function resolveWorkspaceId(currentWorkspaceId: string | null) {
+    if (
+      currentWorkspaceId &&
+      workspaces.value.some((workspace) => workspace.id === currentWorkspaceId)
+    ) {
+      return currentWorkspaceId
+    }
+
+    return workspaces.value[0]?.id ?? null
+  }
+
+  function resolveConversationId(currentConversationId: string | null) {
+    if (
+      currentConversationId &&
+      conversations.value.some((conversation) => conversation.id === currentConversationId)
+    ) {
+      return currentConversationId
+    }
+
+    return channels.value[0]?.id ?? directMessages.value[0]?.id ?? null
   }
 
   return {
@@ -173,23 +248,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeConversationId,
     activeWorkspace,
     activeChannel,
+    activeConversation,
     activeMessages,
     channels,
+    directMessages,
     loading,
+    loadingMessages,
     sending,
     error,
     clear,
     loadDashboard,
+    selectWorkspace,
     selectConversation,
     sendMessage,
   }
 })
-
-function authHeaders(accessToken: string) {
-  return {
-    Authorization: `Bearer ${accessToken}`,
-  }
-}
 
 function initials(name: string) {
   return name

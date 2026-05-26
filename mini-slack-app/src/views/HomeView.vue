@@ -41,6 +41,15 @@ async function selectChannel(id: string) {
   sidebarOpen.value = false
 }
 
+async function selectWorkspace(id: string) {
+  if (!auth.accessToken) {
+    return
+  }
+
+  await workspace.selectWorkspace(auth.accessToken, id)
+  sidebarOpen.value = false
+}
+
 async function sendMessage(content: string) {
   if (!auth.accessToken) {
     return
@@ -66,10 +75,14 @@ async function logout() {
     />
 
     <WorkspaceSidebar
+      :workspaces="workspace.workspaces"
       :workspace-name="workspace.activeWorkspace?.name"
       :channels="workspace.channels"
+      :direct-messages="workspace.directMessages"
+      :active-workspace-id="workspace.activeWorkspaceId ?? ''"
       :active-channel-id="workspace.activeConversationId ?? ''"
       :open="sidebarOpen"
+      @select-workspace="selectWorkspace"
       @select-channel="selectChannel"
       @close="sidebarOpen = false"
     />
@@ -101,16 +114,26 @@ async function logout() {
           v-if="workspace.activeChannel"
           :channel="workspace.activeChannel"
           :messages="workspace.activeMessages"
+          :loading="workspace.loadingMessages"
           :sending="workspace.sending"
+          :error="workspace.error"
           @open-sidebar="sidebarOpen = true"
           @send-message="sendMessage"
         />
         <section v-else class="flex min-w-0 flex-1 items-center justify-center bg-white p-6">
-          <p class="text-sm text-slate-500">
-            {{ workspace.loading ? 'Loading workspace...' : 'No channels found.' }}
-          </p>
+          <div class="max-w-sm text-center">
+            <p class="text-sm font-semibold text-slate-950">
+              {{ workspace.loading ? 'Loading workspace...' : 'No conversations found.' }}
+            </p>
+            <p v-if="workspace.error" class="mt-2 text-sm text-red-700">{{ workspace.error }}</p>
+          </div>
         </section>
-        <ActivityPanel />
+        <ActivityPanel
+          :workspace-count="workspace.workspaces.length"
+          :channel-count="workspace.channels.length"
+          :direct-message-count="workspace.directMessages.length"
+          :message-count="workspace.messages.length"
+        />
       </div>
     </div>
   </main>

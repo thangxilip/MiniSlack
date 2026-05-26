@@ -1,12 +1,17 @@
 import { apiBaseUrl, apiClient } from '@/lib/api-client'
-import type { components } from '@/lib/generated/api-schema'
 
 export interface AuthResponse {
   accessToken: string
   expiresInSeconds: number
 }
 
-export type UserProfile = components['schemas']['UserProfile']
+export interface UserProfile {
+  id: string
+  email: string
+  displayName: string
+  avatarUrl?: string | null
+  status?: string | null
+}
 
 export function loginWithGoogle() {
   window.location.href = `${apiBaseUrl}/auth/login/google`
@@ -18,7 +23,7 @@ export async function refreshAccessToken(): Promise<AuthResponse | null> {
     return null
   }
 
-  return data
+  return data as AuthResponse
 }
 
 export async function revokeSession() {
@@ -36,5 +41,5 @@ export async function getCurrentUser(accessToken: string): Promise<UserProfile> 
     throw new Error('Unable to load the current user.')
   }
 
-  return data
+  return data as UserProfile
 }

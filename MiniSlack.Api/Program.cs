@@ -22,6 +22,7 @@ var builder = WebApplication.CreateBuilder(args);
 var authOptions = builder.Configuration
     .GetSection(AuthOptions.SectionName)
     .Get<AuthOptions>() ?? new AuthOptions();
+ValidateAuthOptions(authOptions);
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -95,6 +96,7 @@ builder.Services.AddAuthentication(options =>
     {
         options.SignInScheme = ExternalCookieScheme;
         options.Authority = "https://accounts.google.com";
+        options.MetadataAddress = "https://accounts.google.com/.well-known/openid-configuration";
         options.ClientId = authOptions.Google.ClientId;
         options.ClientSecret = authOptions.Google.ClientSecret;
         options.CallbackPath = authOptions.Google.CallbackPath;
@@ -303,6 +305,49 @@ static string BuildFrontendRedirectUrl(AuthOptions options)
     var separator = options.Frontend.LoginCallbackUrl.Contains('?') ? "&" : "?";
 
     return $"{options.Frontend.LoginCallbackUrl}{separator}login=success";
+}
+
+static void ValidateAuthOptions(AuthOptions options)
+{
+    var errors = new List<string>();
+
+    if (string.IsNullOrWhiteSpace(options.Google.ClientId))
+    {
+        errors.Add("Authentication:Google:ClientId is required.");
+    }
+
+    if (string.IsNullOrWhiteSpace(options.Google.ClientSecret))
+    {
+        errors.Add("Authentication:Google:ClientSecret is required.");
+    }
+
+    if (string.IsNullOrWhiteSpace(options.Google.CallbackPath) ||
+        !options.Google.CallbackPath.StartsWith('/'))
+    {
+        errors.Add("Authentication:Google:CallbackPath must start with '/'.");
+    }
+
+    if (string.IsNullOrWhiteSpace(options.Jwt.SigningKey) ||
+        Encoding.UTF8.GetByteCount(options.Jwt.SigningKey) < 32)
+    {
+        errors.Add("Authentication:Jwt:SigningKey must be at least 32 bytes.");
+    }
+
+    if (!Uri.TryCreate(options.Frontend.LoginCallbackUrl, UriKind.Absolute, out _))
+    {
+        errors.Add("Authentication:Frontend:LoginCallbackUrl must be an absolute URL.");
+    }
+
+    if (options.Frontend.AllowedOrigins.Length == 0)
+    {
+        errors.Add("Authentication:Frontend:AllowedOrigins must include the Vue app origin.");
+    }
+
+    if (errors.Count > 0)
+    {
+        throw new InvalidOperationException(
+            "Authentication configuration is invalid: " + string.Join(' ', errors));
+    }
 }
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
