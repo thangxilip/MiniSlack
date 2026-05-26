@@ -14,6 +14,7 @@ const auth = useAuthStore()
 const workspace = useWorkspaceStore()
 const router = useRouter()
 const sidebarOpen = ref(false)
+const detailsOpen = ref(false)
 
 onMounted(() => {
   if (auth.accessToken) {
@@ -51,11 +52,43 @@ async function selectWorkspace(id: string) {
 }
 
 async function sendMessage(content: string) {
+  if (!auth.accessToken || !auth.user) {
+    return false
+  }
+
+  return await workspace.sendMessage(auth.accessToken, content, auth.user)
+}
+
+async function createChannel(
+  payload: {
+    name: string
+    description?: string
+    isPrivate: boolean
+  },
+  done: (created: boolean) => void,
+) {
+  if (!auth.accessToken) {
+    done(false)
+    return
+  }
+
+  const created = await workspace.createChannel(auth.accessToken, payload)
+  if (created) {
+    sidebarOpen.value = false
+  }
+
+  done(created)
+}
+
+async function startDirectMessage(userId: string) {
   if (!auth.accessToken) {
     return
   }
 
-  await workspace.sendMessage(auth.accessToken, content)
+  const started = await workspace.startDirectMessage(auth.accessToken, userId)
+  if (started) {
+    detailsOpen.value = false
+  }
 }
 
 async function logout() {
@@ -73,6 +106,12 @@ async function logout() {
       aria-hidden="true"
       @click="sidebarOpen = false"
     />
+    <div
+      v-if="detailsOpen"
+      class="fixed inset-0 z-30 bg-slate-950/30 xl:hidden"
+      aria-hidden="true"
+      @click="detailsOpen = false"
+    />
 
     <WorkspaceSidebar
       :workspaces="workspace.workspaces"
@@ -81,9 +120,11 @@ async function logout() {
       :direct-messages="workspace.directMessages"
       :active-workspace-id="workspace.activeWorkspaceId ?? ''"
       :active-channel-id="workspace.activeConversationId ?? ''"
+      :creating-channel="workspace.creatingChannel"
       :open="sidebarOpen"
       @select-workspace="selectWorkspace"
       @select-channel="selectChannel"
+      @create-channel="createChannel"
       @close="sidebarOpen = false"
     />
 
@@ -117,8 +158,9 @@ async function logout() {
           :loading="workspace.loadingMessages"
           :sending="workspace.sending"
           :error="workspace.error"
+          :on-send-message="sendMessage"
           @open-sidebar="sidebarOpen = true"
-          @send-message="sendMessage"
+          @toggle-details="detailsOpen = !detailsOpen"
         />
         <section v-else class="flex min-w-0 flex-1 items-center justify-center bg-white p-6">
           <div class="max-w-sm text-center">
@@ -133,6 +175,13 @@ async function logout() {
           :channel-count="workspace.channels.length"
           :direct-message-count="workspace.directMessages.length"
           :message-count="workspace.messages.length"
+          :members="workspace.workspaceMembers"
+          :loading-members="workspace.loadingMembers"
+          :current-user-id="auth.user?.id ?? ''"
+          :starting-direct-message="workspace.startingDirectMessage"
+          :open="detailsOpen"
+          @start-direct-message="startDirectMessage"
+          @close="detailsOpen = false"
         />
       </div>
     </div>

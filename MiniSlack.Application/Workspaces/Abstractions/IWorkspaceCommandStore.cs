@@ -17,6 +17,12 @@ public interface IWorkspaceCommandStore
         CreateConversationRequest request,
         CancellationToken cancellationToken);
 
+    Task<ConversationSummary> StartDirectMessageAsync(
+        Guid userId,
+        Guid workspaceId,
+        StartDirectMessageRequest request,
+        CancellationToken cancellationToken);
+
     Task<MessageSummary> CreateMessageAsync(
         Guid userId,
         Guid conversationId,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import {
   Hash,
   Info,
@@ -19,24 +19,57 @@ const props = defineProps<{
   loading: boolean
   sending: boolean
   error: string | null
+  onSendMessage: (content: string) => Promise<boolean>
 }>()
 
 const emit = defineEmits<{
   openSidebar: []
-  sendMessage: [content: string]
+  toggleDetails: []
 }>()
 
 const draft = ref('')
+const messagesEnd = useTemplateRef<HTMLElement>('messagesEnd')
+const composer = useTemplateRef<HTMLTextAreaElement>('composer')
 
 const channelLabel = computed(() => `${props.channel.isPrivate ? '' : '#'}${props.channel.name}`)
 
-function sendMessage() {
+watch(
+  () => [props.channel.id, props.messages.length, props.loading],
+  async () => {
+    await nextTick()
+    messagesEnd.value?.scrollIntoView({ block: 'end' })
+  },
+  {
+    immediate: true,
+  },
+)
+
+watch(
+  () => props.channel.id,
+  async () => {
+    await nextTick()
+    composer.value?.focus()
+  },
+)
+
+async function sendMessage() {
   if (!draft.value.trim()) {
     return
   }
 
-  emit('sendMessage', draft.value.trim())
-  draft.value = ''
+  const sent = await props.onSendMessage(draft.value.trim())
+  if (sent) {
+    draft.value = ''
+  }
+}
+
+function handleComposerKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.shiftKey) {
+    return
+  }
+
+  event.preventDefault()
+  sendMessage()
 }
 </script>
 
@@ -64,7 +97,12 @@ function sendMessage() {
           </p>
         </div>
       </div>
-      <Button variant="ghost" size="icon" aria-label="Channel details">
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Channel details"
+        @click="$emit('toggleDetails')"
+      >
         <Info class="h-5 w-5" />
       </Button>
     </header>
@@ -94,7 +132,10 @@ function sendMessage() {
         <article v-for="message in messages" :key="message.id" class="flex gap-3">
           <div
             v-if="!message.avatar"
-            class="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-emerald-700 text-xs font-bold text-white"
+            :class="[
+              'grid h-10 w-10 shrink-0 place-items-center rounded-md text-xs font-bold text-white',
+              message.pending ? 'bg-slate-400' : 'bg-emerald-700',
+            ]"
           >
             {{ message.initials }}
           </div>
@@ -108,11 +149,20 @@ function sendMessage() {
             <div class="flex flex-wrap items-baseline gap-2">
               <h3 class="text-sm font-bold text-slate-950">{{ message.author }}</h3>
               <time class="text-xs text-slate-500">{{ message.time }}</time>
+              <span v-if="message.pending" class="text-xs text-slate-400">sending</span>
               <span v-if="message.edited" class="text-xs text-slate-400">edited</span>
             </div>
-            <p class="mt-1 text-sm leading-6 text-slate-700">{{ message.body }}</p>
+            <p
+              :class="[
+                'mt-1 text-sm leading-6',
+                message.pending ? 'text-slate-500' : 'text-slate-700',
+              ]"
+            >
+              {{ message.body }}
+            </p>
           </div>
         </article>
+        <div ref="messagesEnd" aria-hidden="true" />
       </div>
     </div>
 
@@ -122,11 +172,13 @@ function sendMessage() {
         @submit.prevent="sendMessage"
       >
         <textarea
+          ref="composer"
           v-model="draft"
           rows="3"
           :disabled="sending"
           class="block max-h-36 min-h-20 w-full resize-none rounded-t-lg border-0 px-3 py-3 text-sm text-slate-950 outline-none placeholder:text-slate-400"
           :placeholder="`Message #${channel.name}`"
+          @keydown="handleComposerKeydown"
         />
         <div class="flex items-center justify-between border-t border-slate-200 px-2 py-2">
           <div class="flex items-center gap-1">

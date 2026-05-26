@@ -6,8 +6,10 @@ using MiniSlack.Application.Workspaces;
 using MiniSlack.Application.Workspaces.Commands.CreateConversation;
 using MiniSlack.Application.Workspaces.Commands.CreateMessage;
 using MiniSlack.Application.Workspaces.Commands.CreateWorkspace;
+using MiniSlack.Application.Workspaces.Commands.StartDirectMessage;
 using MiniSlack.Application.Workspaces.Queries.GetConversations;
 using MiniSlack.Application.Workspaces.Queries.GetMessages;
+using MiniSlack.Application.Workspaces.Queries.GetWorkspaceMembers;
 using MiniSlack.Application.Workspaces.Queries.GetWorkspaces;
 
 namespace MiniSlack.Endpoints;
@@ -32,8 +34,16 @@ public static class WorkspaceEndpoints
             .WithName("GetWorkspaceConversations")
             .WithOpenApi();
 
+        workspaces.MapGet("/{workspaceId:guid}/members", GetWorkspaceMembersAsync)
+            .WithName("GetWorkspaceMembers")
+            .WithOpenApi();
+
         workspaces.MapPost("/{workspaceId:guid}/conversations", CreateConversationAsync)
             .WithName("CreateWorkspaceConversation")
+            .WithOpenApi();
+
+        workspaces.MapPost("/{workspaceId:guid}/direct-messages", StartDirectMessageAsync)
+            .WithName("StartWorkspaceDirectMessage")
             .WithOpenApi();
 
         var conversations = app.MapGroup("/conversations")
@@ -109,6 +119,28 @@ public static class WorkspaceEndpoints
         }
     }
 
+    private static async Task<Results<Ok<IReadOnlyList<WorkspaceMemberSummary>>, NotFound, UnauthorizedHttpResult>> GetWorkspaceMembersAsync(
+        Guid workspaceId,
+        ClaimsPrincipal user,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var members = await sender.Send(new GetWorkspaceMembersQuery(userId, workspaceId), cancellationToken);
+            return TypedResults.Ok(members);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
     private static async Task<Results<Created<ConversationSummary>, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> CreateConversationAsync(
         Guid workspaceId,
         ClaimsPrincipal user,
@@ -127,6 +159,39 @@ public static class WorkspaceEndpoints
                 new CreateConversationCommand(userId, workspaceId, request),
                 cancellationToken);
             return TypedResults.Created($"/conversations/{conversation.Id}", conversation);
+        }
+        catch (ArgumentException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
+    private static async Task<Results<Ok<ConversationSummary>, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> StartDirectMessageAsync(
+        Guid workspaceId,
+        ClaimsPrincipal user,
+        StartDirectMessageRequest request,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var conversation = await sender.Send(
+                new StartDirectMessageCommand(userId, workspaceId, request),
+                cancellationToken);
+            return TypedResults.Ok(conversation);
         }
         catch (ArgumentException exception)
         {

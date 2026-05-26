@@ -1,25 +1,72 @@
 <script setup lang="ts">
-import { Hash, LockKeyhole, MessageCircle, Search, UsersRound, X } from 'lucide-vue-next'
+import { computed, nextTick, ref, useTemplateRef } from 'vue'
+import { Hash, LockKeyhole, MessageCircle, Plus, Search, UsersRound, X } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import type { WorkspaceChannel, WorkspaceDirectMessage } from '@/stores/workspace'
 import type { WorkspaceSummary } from '@/lib/workspace-api'
 import { cn } from '@/lib/utils'
 
-defineProps<{
+const props = defineProps<{
   workspaces: WorkspaceSummary[]
   workspaceName?: string
   channels: WorkspaceChannel[]
   directMessages: WorkspaceDirectMessage[]
   activeWorkspaceId: string
   activeChannelId: string
+  creatingChannel: boolean
   open: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   selectWorkspace: [id: string]
   selectChannel: [id: string]
+  createChannel: [
+    payload: { name: string; description?: string; isPrivate: boolean },
+    done: (created: boolean) => void,
+  ]
   close: []
 }>()
+
+const showCreateChannel = ref(false)
+const channelName = ref('')
+const channelDescription = ref('')
+const isPrivate = ref(false)
+const nameInput = useTemplateRef<HTMLInputElement>('nameInput')
+
+const canCreate = computed(() => Boolean(channelName.value.trim()) && !props.creatingChannel)
+
+async function openCreateChannel() {
+  showCreateChannel.value = true
+  await nextTick()
+  nameInput.value?.focus()
+}
+
+function cancelCreateChannel() {
+  showCreateChannel.value = false
+  channelName.value = ''
+  channelDescription.value = ''
+  isPrivate.value = false
+}
+
+async function createChannel() {
+  if (!canCreate.value) {
+    return
+  }
+
+  emit(
+    'createChannel',
+    {
+      name: channelName.value,
+      description: channelDescription.value,
+      isPrivate: isPrivate.value,
+    },
+    (created) => {
+      if (created) {
+        cancelCreateChannel()
+      }
+    },
+  )
+}
 </script>
 
 <template>
@@ -77,8 +124,52 @@ defineEmits<{
       <div class="mb-5">
         <div class="mb-2 flex items-center justify-between px-2">
           <p class="text-xs font-bold uppercase text-slate-500">Channels</p>
-          <span class="text-xs font-semibold text-slate-400">{{ channels.length }}</span>
+          <div class="flex items-center gap-1">
+            <span class="text-xs font-semibold text-slate-400">{{ channels.length }}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7"
+              aria-label="Create channel"
+              @click="openCreateChannel"
+            >
+              <Plus class="h-4 w-4" />
+            </Button>
+          </div>
         </div>
+        <form
+          v-if="showCreateChannel"
+          class="mb-2 rounded-md border border-slate-200 bg-slate-50 p-2"
+          @submit.prevent="createChannel"
+        >
+          <input
+            ref="nameInput"
+            v-model="channelName"
+            class="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-950 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-600"
+            maxlength="120"
+            placeholder="Channel name"
+          />
+          <input
+            v-model="channelDescription"
+            class="mt-2 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-950 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-600"
+            maxlength="512"
+            placeholder="Description"
+          />
+          <label class="mt-2 flex items-center gap-2 px-1 text-sm font-medium text-slate-700">
+            <input
+              v-model="isPrivate"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300 accent-emerald-700"
+            />
+            Private channel
+          </label>
+          <div class="mt-3 flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" @click="cancelCreateChannel">Cancel</Button>
+            <Button type="submit" size="sm" :disabled="!canCreate">
+              {{ creatingChannel ? 'Creating' : 'Create' }}
+            </Button>
+          </div>
+        </form>
         <div class="space-y-1">
           <button
             v-for="channel in channels"

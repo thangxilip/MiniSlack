@@ -73,7 +73,10 @@ public sealed class AppDbContext : DbContext
             switch (entry.State)
             {
                 case EntityState.Added:
-                    entry.Entity.CreatedAtUtc = utcNow;
+                    if (entry.Entity.CreatedAtUtc == default)
+                    {
+                        entry.Entity.CreatedAtUtc = utcNow;
+                    }
                     break;
 
                 case EntityState.Modified:

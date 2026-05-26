@@ -11,6 +11,11 @@ public interface IWorkspaceReadStore
         Guid workspaceId,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<WorkspaceMemberSummary>> GetWorkspaceMembersAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<MessageSummary>> GetMessagesAsync(
         Guid userId,
         Guid conversationId,

@@ -48,11 +48,38 @@ public sealed class WorkspaceReadStore : IWorkspaceReadStore
                 conversation.Id,
                 conversation.WorkspaceId,
                 conversation.Type,
-                conversation.Name ?? "direct message",
+                conversation.Type == MiniSlack.Domain.Conversations.ConversationType.Direct
+                    ? conversation.Members
+                        .Where(member => member.UserId != userId)
+                        .Select(member => member.User!.DisplayName)
+                        .FirstOrDefault() ?? conversation.Name ?? "direct message"
+                    : conversation.Name ?? "direct message",
                 conversation.Description,
                 conversation.IsPrivate,
                 conversation.Members.Count,
                 conversation.CreatedAtUtc))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<WorkspaceMemberSummary>> GetWorkspaceMembersAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        await EnsureWorkspaceMemberAsync(userId, workspaceId, cancellationToken);
+
+        return await _dbContext.WorkspaceMembers
+            .AsNoTracking()
+            .Where(member => member.WorkspaceId == workspaceId)
+            .OrderBy(member => member.User!.DisplayName)
+            .Select(member => new WorkspaceMemberSummary(
+                member.UserId,
+                member.User!.DisplayName,
+                member.User.Email,
+                member.User.AvatarUrl,
+                member.User.Status,
+                member.Role,
+                member.JoinedAtUtc))
             .ToListAsync(cancellationToken);
     }
 
