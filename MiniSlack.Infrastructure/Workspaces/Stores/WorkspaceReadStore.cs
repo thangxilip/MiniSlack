@@ -121,6 +121,48 @@ public sealed class WorkspaceReadStore : IWorkspaceReadStore
         return messages;
     }
 
+    public Task<bool> IsWorkspaceMemberAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.WorkspaceMembers.AnyAsync(
+            member => member.WorkspaceId == workspaceId && member.UserId == userId,
+            cancellationToken);
+    }
+
+    public Task<bool> IsConversationMemberAsync(
+        Guid userId,
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.ConversationMembers.AnyAsync(
+            member => member.ConversationId == conversationId && member.UserId == userId,
+            cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetWorkspaceIdsForUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        return await _dbContext.WorkspaceMembers
+            .AsNoTracking()
+            .Where(member => member.UserId == userId)
+            .Select(member => member.WorkspaceId)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<string?> GetUserDisplayNameAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.DisplayName)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     private async Task EnsureWorkspaceMemberAsync(
         Guid userId,
         Guid workspaceId,

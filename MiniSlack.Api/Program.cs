@@ -9,10 +9,13 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MiniSlack.Application;
+using MiniSlack.Application.Realtime;
 using MiniSlack.Application.Auth;
 using MiniSlack.Endpoints;
+using MiniSlack.Hubs;
 using MiniSlack.Infrastructure;
 using MiniSlack.Infrastructure.Auth;
+using MiniSlack.Realtime;
 
 const string ExternalCookieScheme = "ExternalOidc";
 const string GoogleOidcScheme = "GoogleOidc";
@@ -27,6 +30,8 @@ ValidateAuthOptions(authOptions);
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IRealtimeNotifier, SignalRRealtimeNotifier>();
 builder.Services.AddSwaggerGen(options =>
 {
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -90,6 +95,22 @@ builder.Services.AddAuthentication(options =>
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authOptions.Jwt.SigningKey)),
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1)
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken)
+                    && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
         };
     })
     .AddOpenIdConnect(GoogleOidcScheme, options =>
@@ -217,6 +238,8 @@ app.MapGet("/auth/me", async (
     .RequireAuthorization();
 
 app.MapWorkspaceEndpoints();
+app.MapHub<WorkspaceHub>("/hubs/workspace")
+    .RequireAuthorization();
 
 app.MapGet("/weatherforecast", () =>
     {

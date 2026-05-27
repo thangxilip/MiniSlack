@@ -16,18 +16,21 @@ const router = useRouter()
 const sidebarOpen = ref(false)
 const detailsOpen = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
   if (auth.accessToken) {
-    workspace.loadDashboard(auth.accessToken)
+    await workspace.loadDashboard(auth.accessToken)
+    await workspace.connectRealtime(() => auth.accessToken)
   }
 })
 
 watch(
   () => auth.accessToken,
-  (accessToken) => {
+  async (accessToken) => {
     if (accessToken) {
-      workspace.loadDashboard(accessToken)
+      await workspace.loadDashboard(accessToken)
+      await workspace.connectRealtime(() => auth.accessToken)
     } else {
+      await workspace.disconnectRealtime()
       workspace.clear()
     }
   },
@@ -57,6 +60,14 @@ async function sendMessage(content: string) {
   }
 
   return await workspace.sendMessage(auth.accessToken, content, auth.user)
+}
+
+async function startTyping(conversationId: string) {
+  await workspace.startTyping(conversationId)
+}
+
+async function stopTyping(conversationId: string) {
+  await workspace.stopTyping(conversationId)
 }
 
 async function createChannel(
@@ -92,6 +103,7 @@ async function startDirectMessage(userId: string) {
 }
 
 async function logout() {
+  await workspace.disconnectRealtime()
   await auth.logout()
   workspace.clear()
   await router.replace({ name: 'login' })
@@ -158,7 +170,10 @@ async function logout() {
           :loading="workspace.loadingMessages"
           :sending="workspace.sending"
           :error="workspace.error"
+          :typing-users="workspace.activeTypingUsers"
           :on-send-message="sendMessage"
+          :on-start-typing="startTyping"
+          :on-stop-typing="stopTyping"
           @open-sidebar="sidebarOpen = true"
           @toggle-details="detailsOpen = !detailsOpen"
         />

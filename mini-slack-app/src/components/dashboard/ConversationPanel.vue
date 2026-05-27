@@ -11,7 +11,7 @@ import {
   Smile,
 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
-import type { WorkspaceChannel, WorkspaceMessage } from '@/stores/workspace'
+import type { TypingUser, WorkspaceChannel, WorkspaceMessage } from '@/stores/workspace'
 
 const props = defineProps<{
   channel: WorkspaceChannel
@@ -19,7 +19,10 @@ const props = defineProps<{
   loading: boolean
   sending: boolean
   error: string | null
+  typingUsers: TypingUser[]
   onSendMessage: (content: string) => Promise<boolean>
+  onStartTyping: (conversationId: string) => Promise<void>
+  onStopTyping: (conversationId: string) => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const draft = ref('')
+const lastTypingAt = ref(0)
 const messagesEnd = useTemplateRef<HTMLElement>('messagesEnd')
 const composer = useTemplateRef<HTMLTextAreaElement>('composer')
 
@@ -47,6 +51,7 @@ watch(
 watch(
   () => props.channel.id,
   async () => {
+    lastTypingAt.value = 0
     await nextTick()
     composer.value?.focus()
   },
@@ -60,7 +65,30 @@ async function sendMessage() {
   const sent = await props.onSendMessage(draft.value.trim())
   if (sent) {
     draft.value = ''
+    lastTypingAt.value = 0
+    await props.onStopTyping(props.channel.id)
   }
+}
+
+async function handleDraftInput() {
+  if (!draft.value.trim()) {
+    lastTypingAt.value = 0
+    await props.onStopTyping(props.channel.id)
+    return
+  }
+
+  const now = Date.now()
+  if (now - lastTypingAt.value < 2500) {
+    return
+  }
+
+  lastTypingAt.value = now
+  await props.onStartTyping(props.channel.id)
+}
+
+async function handleComposerBlur() {
+  lastTypingAt.value = 0
+  await props.onStopTyping(props.channel.id)
 }
 
 function handleComposerKeydown(event: KeyboardEvent) {
@@ -162,6 +190,10 @@ function handleComposerKeydown(event: KeyboardEvent) {
             </p>
           </div>
         </article>
+        <p v-if="typingUsers.length" class="text-sm text-slate-500">
+          {{ typingUsers.map((user) => user.name).join(', ') }}
+          {{ typingUsers.length === 1 ? 'is' : 'are' }} typing...
+        </p>
         <div ref="messagesEnd" aria-hidden="true" />
       </div>
     </div>
@@ -178,6 +210,8 @@ function handleComposerKeydown(event: KeyboardEvent) {
           :disabled="sending"
           class="block max-h-36 min-h-20 w-full resize-none rounded-t-lg border-0 px-3 py-3 text-sm text-slate-950 outline-none placeholder:text-slate-400"
           :placeholder="`Message #${channel.name}`"
+          @input="handleDraftInput"
+          @blur="handleComposerBlur"
           @keydown="handleComposerKeydown"
         />
         <div class="flex items-center justify-between border-t border-slate-200 px-2 py-2">

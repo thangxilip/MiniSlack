@@ -3,10 +3,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniSlack.Application.Auth;
 using MiniSlack.Application.Common.Persistence;
+using MiniSlack.Application.Realtime;
 using MiniSlack.Application.Workspaces.Abstractions;
 using MiniSlack.Infrastructure.Auth;
 using MiniSlack.Infrastructure.Persistence;
 using MiniSlack.Infrastructure.Persistence.Repositories;
+using MiniSlack.Infrastructure.Realtime;
 using MiniSlack.Infrastructure.Workspaces.Stores;
 
 namespace MiniSlack.Infrastructure;
@@ -31,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWorkspaceCommandStore, WorkspaceCommandStore>();
         services.AddScoped<IWorkspaceReadStore, WorkspaceReadStore>();
+        services.AddSingleton<IUserPresenceTracker, InMemoryUserPresenceTracker>();
 
         return services;
     }

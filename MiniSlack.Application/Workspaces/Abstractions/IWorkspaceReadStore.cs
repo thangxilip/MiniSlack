@@ -22,4 +22,22 @@ public interface IWorkspaceReadStore
         DateTimeOffset? before,
         int limit,
         CancellationToken cancellationToken);
+
+    Task<bool> IsWorkspaceMemberAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken);
+
+    Task<bool> IsConversationMemberAsync(
+        Guid userId,
+        Guid conversationId,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Guid>> GetWorkspaceIdsForUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken);
+
+    Task<string?> GetUserDisplayNameAsync(
+        Guid userId,
+        CancellationToken cancellationToken);
 }
