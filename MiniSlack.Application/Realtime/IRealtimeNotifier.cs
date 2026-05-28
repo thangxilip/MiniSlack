@@ -12,4 +12,18 @@ public interface IRealtimeNotifier
         ConversationSummary conversation,
         IReadOnlyCollection<Guid> recipientUserIds,
         CancellationToken cancellationToken);
+
+    Task WorkspaceMemberAddedAsync(
+        WorkspaceMemberSummary member,
+        Guid workspaceId,
+        CancellationToken cancellationToken);
+
+    Task WorkspaceMemberRemovedAsync(
+        RemovedWorkspaceMemberSummary member,
+        CancellationToken cancellationToken);
+
+    Task WorkspaceMemberRoleChangedAsync(
+        WorkspaceMemberSummary member,
+        Guid workspaceId,
+        CancellationToken cancellationToken);
 }

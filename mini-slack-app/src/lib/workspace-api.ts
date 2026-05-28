@@ -45,6 +45,29 @@ export interface WorkspaceMemberSummary {
   joinedAtUtc: string
 }
 
+export interface WorkspaceInviteSummary {
+  id: string
+  workspaceId: string
+  email: string
+  role: WorkspaceSummary['role']
+  invitedByUserId: string
+  invitedByDisplayName: string
+  expiresAtUtc: string
+  acceptedAtUtc: string | null
+  revokedAtUtc: string | null
+  createdAtUtc: string
+}
+
+export interface CreatedWorkspaceInviteSummary extends WorkspaceInviteSummary {
+  token: string
+  acceptUrl: string
+}
+
+export interface AcceptWorkspaceInviteResult {
+  workspace: WorkspaceSummary
+  member: WorkspaceMemberSummary
+}
+
 export interface CreateChannelRequest {
   name: string
   description?: string | null
@@ -100,6 +123,134 @@ export async function getWorkspaceMembers(
 
   const data = (await response.json()) as unknown[]
   return data.map(normalizeWorkspaceMember)
+}
+
+export async function getWorkspaceInvites(
+  accessToken: string,
+  workspaceId: string,
+): Promise<WorkspaceInviteSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/workspaces/${workspaceId}/invites`, {
+    credentials: 'include',
+    headers: authHeaders(accessToken),
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to load workspace invites.')
+  }
+
+  const data = (await response.json()) as unknown[]
+  return data.map(normalizeWorkspaceInvite)
+}
+
+export async function createWorkspaceInvite(
+  accessToken: string,
+  workspaceId: string,
+  request: {
+    email: string
+    role: WorkspaceSummary['role']
+  },
+): Promise<CreatedWorkspaceInviteSummary> {
+  const response = await fetch(`${apiBaseUrl}/workspaces/${workspaceId}/invites`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      ...authHeaders(accessToken),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to create workspace invite.')
+  }
+
+  return normalizeCreatedWorkspaceInvite(await response.json())
+}
+
+export async function revokeWorkspaceInvite(
+  accessToken: string,
+  workspaceId: string,
+  inviteId: string,
+): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/workspaces/${workspaceId}/invites/${inviteId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: authHeaders(accessToken),
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to revoke workspace invite.')
+  }
+}
+
+export async function acceptWorkspaceInvite(
+  accessToken: string,
+  token: string,
+): Promise<AcceptWorkspaceInviteResult> {
+  const response = await fetch(`${apiBaseUrl}/workspace-invites/accept`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      ...authHeaders(accessToken),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ token }),
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to accept workspace invite.')
+  }
+
+  const data = (await response.json()) as Record<string, unknown>
+  return {
+    workspace: normalizeWorkspace(data.workspace as ApiWorkspaceSummary),
+    member: normalizeWorkspaceMember(data.member),
+  }
+}
+
+export async function removeWorkspaceMember(
+  accessToken: string,
+  workspaceId: string,
+  targetUserId: string,
+): Promise<{ workspaceId: string; userId: string }> {
+  const response = await fetch(`${apiBaseUrl}/workspaces/${workspaceId}/members/${targetUserId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: authHeaders(accessToken),
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to remove workspace member.')
+  }
+
+  const data = (await response.json()) as Record<string, unknown>
+  return {
+    workspaceId: requireString(asNullableString(data.workspaceId)),
+    userId: requireString(asNullableString(data.userId)),
+  }
+}
+
+export async function updateWorkspaceMemberRole(
+  accessToken: string,
+  workspaceId: string,
+  targetUserId: string,
+  role: WorkspaceSummary['role'],
+): Promise<WorkspaceMemberSummary> {
+  const response = await fetch(`${apiBaseUrl}/workspaces/${workspaceId}/members/${targetUserId}/role`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      ...authHeaders(accessToken),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ role }),
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to update workspace member role.')
+  }
+
+  return normalizeWorkspaceMember(await response.json())
 }
 
 export async function getConversationMessages(
@@ -254,6 +405,33 @@ function normalizeWorkspaceMember(value: unknown): WorkspaceMemberSummary {
     status: asNullableString(member.status),
     role: normalizeWorkspaceRole(member.role),
     joinedAtUtc: asNullableString(member.joinedAtUtc) ?? new Date().toISOString(),
+  }
+}
+
+function normalizeWorkspaceInvite(value: unknown): WorkspaceInviteSummary {
+  const invite = value as Record<string, unknown>
+
+  return {
+    id: requireString(asNullableString(invite.id)),
+    workspaceId: requireString(asNullableString(invite.workspaceId)),
+    email: asNullableString(invite.email) ?? '',
+    role: normalizeWorkspaceRole(invite.role),
+    invitedByUserId: requireString(asNullableString(invite.invitedByUserId)),
+    invitedByDisplayName: asNullableString(invite.invitedByDisplayName) ?? 'Unknown user',
+    expiresAtUtc: asNullableString(invite.expiresAtUtc) ?? new Date().toISOString(),
+    acceptedAtUtc: asNullableString(invite.acceptedAtUtc),
+    revokedAtUtc: asNullableString(invite.revokedAtUtc),
+    createdAtUtc: asNullableString(invite.createdAtUtc) ?? new Date().toISOString(),
+  }
+}
+
+function normalizeCreatedWorkspaceInvite(value: unknown): CreatedWorkspaceInviteSummary {
+  const invite = value as Record<string, unknown>
+
+  return {
+    ...normalizeWorkspaceInvite(value),
+    token: asNullableString(invite.token) ?? '',
+    acceptUrl: asNullableString(invite.acceptUrl) ?? '',
   }
 }
 

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using MiniSlack.Application.Workspaces;
@@ -12,6 +14,8 @@ namespace MiniSlack.Infrastructure.Workspaces.Stores;
 
 public sealed partial class WorkspaceCommandStore : IWorkspaceCommandStore
 {
+    private const int InviteTokenBytes = 32;
+    private static readonly TimeSpan InviteLifetime = TimeSpan.FromDays(7);
     private readonly AppDbContext _dbContext;
 
     public WorkspaceCommandStore(AppDbContext dbContext)
@@ -273,6 +277,291 @@ public sealed partial class WorkspaceCommandStore : IWorkspaceCommandStore
             message.EditedAtUtc);
     }
 
+    public async Task<CreatedWorkspaceInviteSummary> CreateWorkspaceInviteAsync(
+        Guid userId,
+        Guid workspaceId,
+        CreateWorkspaceInviteRequest request,
+        string acceptUrlBase,
+        CancellationToken cancellationToken)
+    {
+        var requesterRole = await GetWorkspaceRoleAsync(userId, workspaceId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("You do not have access to this workspace.");
+
+        if (requesterRole is not (WorkspaceMemberRole.Admin or WorkspaceMemberRole.Owner))
+        {
+            throw new UnauthorizedAccessException("You do not have permission to invite members.");
+        }
+
+        if (request.Role == WorkspaceMemberRole.Owner
+            || request.Role == WorkspaceMemberRole.Admin && requesterRole != WorkspaceMemberRole.Owner)
+        {
+            throw new InvalidOperationException("You cannot invite a member with this role.");
+        }
+
+        var email = NormalizeEmail(request.Email);
+        var normalizedEmail = NormalizeEmailKey(email);
+        var alreadyMember = await _dbContext.WorkspaceMembers.AnyAsync(
+            member => member.WorkspaceId == workspaceId
+                && member.User!.Email.ToUpper() == normalizedEmail,
+            cancellationToken);
+
+        if (alreadyMember)
+        {
+            throw new InvalidOperationException("This email is already a workspace member.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var existingInvite = await _dbContext.WorkspaceInvites
+            .Where(invite => invite.WorkspaceId == workspaceId
+                && invite.NormalizedEmail == normalizedEmail
+                && invite.AcceptedAtUtc == null
+                && invite.RevokedAtUtc == null
+                && invite.ExpiresAtUtc > now)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (existingInvite is not null)
+        {
+            throw new InvalidOperationException("This email already has a pending invite.");
+        }
+
+        var token = GenerateInviteToken();
+        var invite = new WorkspaceInvite
+        {
+            Id = Guid.NewGuid(),
+            WorkspaceId = workspaceId,
+            Email = email,
+            NormalizedEmail = normalizedEmail,
+            Role = request.Role,
+            TokenHash = HashToken(token),
+            InvitedByUserId = userId,
+            ExpiresAtUtc = now.Add(InviteLifetime)
+        };
+
+        _dbContext.WorkspaceInvites.Add(invite);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var invitedBy = await _dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.DisplayName)
+            .SingleAsync(cancellationToken);
+
+        return new CreatedWorkspaceInviteSummary(
+            invite.Id,
+            invite.WorkspaceId,
+            invite.Email,
+            invite.Role,
+            invite.InvitedByUserId,
+            invitedBy,
+            invite.ExpiresAtUtc,
+            invite.CreatedAtUtc,
+            token,
+            BuildAcceptUrl(acceptUrlBase, token));
+    }
+
+    public async Task<AcceptWorkspaceInviteResult> AcceptWorkspaceInviteAsync(
+        Guid userId,
+        AcceptWorkspaceInviteRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token))
+        {
+            throw new ArgumentException("Invite token is required.");
+        }
+
+        var tokenHash = HashToken(request.Token.Trim());
+        var now = DateTimeOffset.UtcNow;
+        var invite = await _dbContext.WorkspaceInvites
+            .Include(candidate => candidate.Workspace)
+            .SingleOrDefaultAsync(candidate => candidate.TokenHash == tokenHash, cancellationToken)
+            ?? throw new InvalidOperationException("Invite was not found.");
+
+        if (invite.AcceptedAtUtc is not null)
+        {
+            throw new InvalidOperationException("Invite was already accepted.");
+        }
+
+        if (invite.RevokedAtUtc is not null)
+        {
+            throw new InvalidOperationException("Invite was revoked.");
+        }
+
+        if (invite.ExpiresAtUtc <= now)
+        {
+            throw new InvalidOperationException("Invite has expired.");
+        }
+
+        var user = await _dbContext.Users
+            .SingleOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Current user was not found.");
+
+        if (!string.Equals(NormalizeEmailKey(user.Email), invite.NormalizedEmail, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("This invite was sent to a different email address.");
+        }
+
+        var existingActiveMember = await _dbContext.WorkspaceMembers.AnyAsync(
+            member => member.WorkspaceId == invite.WorkspaceId && member.UserId == userId,
+            cancellationToken);
+
+        if (existingActiveMember)
+        {
+            throw new InvalidOperationException("You are already a member of this workspace.");
+        }
+
+        var workspaceMember = await _dbContext.WorkspaceMembers
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(
+                member => member.WorkspaceId == invite.WorkspaceId && member.UserId == userId,
+                cancellationToken);
+
+        if (workspaceMember is null)
+        {
+            workspaceMember = new WorkspaceMember
+            {
+                Id = Guid.NewGuid(),
+                WorkspaceId = invite.WorkspaceId,
+                UserId = userId
+            };
+            _dbContext.WorkspaceMembers.Add(workspaceMember);
+        }
+
+        workspaceMember.Role = invite.Role;
+        workspaceMember.JoinedAtUtc = now;
+        workspaceMember.IsDeleted = false;
+        workspaceMember.DeletedAtUtc = null;
+        workspaceMember.DeletedByUserId = null;
+
+        await AddMemberToPublicChannelsAsync(invite.WorkspaceId, userId, cancellationToken);
+
+        invite.AcceptedAtUtc = now;
+        invite.AcceptedByUserId = userId;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var workspace = invite.Workspace
+            ?? await _dbContext.Workspaces.SingleAsync(candidate => candidate.Id == invite.WorkspaceId, cancellationToken);
+
+        var member = new WorkspaceMemberSummary(
+            user.Id,
+            user.DisplayName,
+            user.Email,
+            user.AvatarUrl,
+            user.Status,
+            workspaceMember.Role,
+            workspaceMember.JoinedAtUtc);
+
+        return new AcceptWorkspaceInviteResult(
+            new WorkspaceSummary(workspace.Id, workspace.Name, workspace.Slug, workspaceMember.Role),
+            member);
+    }
+
+    public async Task RevokeWorkspaceInviteAsync(
+        Guid userId,
+        Guid workspaceId,
+        Guid inviteId,
+        CancellationToken cancellationToken)
+    {
+        await EnsureWorkspaceAdminAsync(userId, workspaceId, cancellationToken);
+
+        var invite = await _dbContext.WorkspaceInvites.SingleOrDefaultAsync(
+            candidate => candidate.Id == inviteId && candidate.WorkspaceId == workspaceId,
+            cancellationToken)
+            ?? throw new InvalidOperationException("Invite was not found.");
+
+        if (invite.AcceptedAtUtc is not null)
+        {
+            throw new InvalidOperationException("Accepted invites cannot be revoked.");
+        }
+
+        if (invite.RevokedAtUtc is null)
+        {
+            invite.RevokedAtUtc = DateTimeOffset.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task<RemovedWorkspaceMemberSummary> RemoveWorkspaceMemberAsync(
+        Guid userId,
+        Guid workspaceId,
+        Guid targetUserId,
+        CancellationToken cancellationToken)
+    {
+        if (userId == targetUserId)
+        {
+            throw new InvalidOperationException("You cannot remove yourself from the workspace.");
+        }
+
+        var requesterRole = await GetWorkspaceRoleAsync(userId, workspaceId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("You do not have access to this workspace.");
+        var targetMember = await _dbContext.WorkspaceMembers.SingleOrDefaultAsync(
+            member => member.WorkspaceId == workspaceId && member.UserId == targetUserId,
+            cancellationToken)
+            ?? throw new InvalidOperationException("Workspace member was not found.");
+
+        if (requesterRole == WorkspaceMemberRole.Member
+            || requesterRole == WorkspaceMemberRole.Admin && targetMember.Role != WorkspaceMemberRole.Member)
+        {
+            throw new UnauthorizedAccessException("You do not have permission to remove this member.");
+        }
+
+        if (targetMember.Role == WorkspaceMemberRole.Owner)
+        {
+            await EnsureAnotherOwnerExistsAsync(workspaceId, targetUserId, cancellationToken);
+        }
+
+        var conversationMembers = await _dbContext.ConversationMembers
+            .Where(member => member.UserId == targetUserId
+                && member.Conversation!.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+
+        _dbContext.ConversationMembers.RemoveRange(conversationMembers);
+        _dbContext.WorkspaceMembers.Remove(targetMember);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new RemovedWorkspaceMemberSummary(workspaceId, targetUserId);
+    }
+
+    public async Task<WorkspaceMemberSummary> UpdateWorkspaceMemberRoleAsync(
+        Guid userId,
+        Guid workspaceId,
+        Guid targetUserId,
+        UpdateWorkspaceMemberRoleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var requesterRole = await GetWorkspaceRoleAsync(userId, workspaceId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("You do not have access to this workspace.");
+
+        if (requesterRole != WorkspaceMemberRole.Owner)
+        {
+            throw new UnauthorizedAccessException("Only workspace owners can change member roles.");
+        }
+
+        var targetMember = await _dbContext.WorkspaceMembers
+            .Include(member => member.User)
+            .SingleOrDefaultAsync(
+                member => member.WorkspaceId == workspaceId && member.UserId == targetUserId,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Workspace member was not found.");
+
+        if (targetMember.Role == WorkspaceMemberRole.Owner && request.Role != WorkspaceMemberRole.Owner)
+        {
+            await EnsureAnotherOwnerExistsAsync(workspaceId, targetUserId, cancellationToken);
+        }
+
+        targetMember.Role = request.Role;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new WorkspaceMemberSummary(
+            targetMember.UserId,
+            targetMember.User!.DisplayName,
+            targetMember.User.Email,
+            targetMember.User.AvatarUrl,
+            targetMember.User.Status,
+            targetMember.Role,
+            targetMember.JoinedAtUtc);
+    }
+
     private async Task EnsureWorkspaceMemberAsync(
         Guid userId,
         Guid workspaceId,
@@ -285,6 +574,84 @@ public sealed partial class WorkspaceCommandStore : IWorkspaceCommandStore
         if (!isMember)
         {
             throw new UnauthorizedAccessException("You do not have access to this workspace.");
+        }
+    }
+
+    private async Task EnsureWorkspaceAdminAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var role = await GetWorkspaceRoleAsync(userId, workspaceId, cancellationToken);
+        if (role is not (WorkspaceMemberRole.Admin or WorkspaceMemberRole.Owner))
+        {
+            throw new UnauthorizedAccessException("You do not have permission to manage this workspace.");
+        }
+    }
+
+    private Task<WorkspaceMemberRole?> GetWorkspaceRoleAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.WorkspaceMembers
+            .Where(member => member.WorkspaceId == workspaceId && member.UserId == userId)
+            .Select(member => (WorkspaceMemberRole?)member.Role)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task EnsureAnotherOwnerExistsAsync(
+        Guid workspaceId,
+        Guid excludedUserId,
+        CancellationToken cancellationToken)
+    {
+        var hasAnotherOwner = await _dbContext.WorkspaceMembers.AnyAsync(
+            member => member.WorkspaceId == workspaceId
+                && member.UserId != excludedUserId
+                && member.Role == WorkspaceMemberRole.Owner,
+            cancellationToken);
+
+        if (!hasAnotherOwner)
+        {
+            throw new InvalidOperationException("A workspace must have at least one owner.");
+        }
+    }
+
+    private async Task AddMemberToPublicChannelsAsync(
+        Guid workspaceId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var publicChannelIds = await _dbContext.Conversations
+            .AsNoTracking()
+            .Where(conversation => conversation.WorkspaceId == workspaceId
+                && conversation.Type == ConversationType.Channel
+                && !conversation.IsPrivate)
+            .Select(conversation => conversation.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var conversationId in publicChannelIds)
+        {
+            var member = await _dbContext.ConversationMembers
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.ConversationId == conversationId && candidate.UserId == userId,
+                    cancellationToken);
+
+            if (member is null)
+            {
+                _dbContext.ConversationMembers.Add(CreateConversationMember(
+                    conversationId,
+                    userId,
+                    ConversationMemberRole.Member));
+                continue;
+            }
+
+            member.Role = ConversationMemberRole.Member;
+            member.JoinedAtUtc = DateTimeOffset.UtcNow;
+            member.IsDeleted = false;
+            member.DeletedAtUtc = null;
+            member.DeletedByUserId = null;
         }
     }
 
@@ -335,6 +702,46 @@ public sealed partial class WorkspaceCommandStore : IWorkspaceCommandStore
         }
 
         return slug;
+    }
+
+    private static string NormalizeEmail(string value)
+    {
+        var email = NormalizeRequiredText(value, 320, "Email is required.");
+        if (!email.Contains('@', StringComparison.Ordinal) || email.StartsWith('@') || email.EndsWith('@'))
+        {
+            throw new ArgumentException("A valid email address is required.");
+        }
+
+        return email;
+    }
+
+    private static string NormalizeEmailKey(string email)
+    {
+        return email.Trim().ToUpperInvariant();
+    }
+
+    private static string GenerateInviteToken()
+    {
+        Span<byte> bytes = stackalloc byte[InviteTokenBytes];
+        RandomNumberGenerator.Fill(bytes);
+        return Convert.ToBase64String(bytes)
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
+    }
+
+    private static string HashToken(string token)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(bytes);
+    }
+
+    private static string BuildAcceptUrl(
+        string acceptUrlBase,
+        string token)
+    {
+        var separator = acceptUrlBase.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{acceptUrlBase}{separator}token={Uri.EscapeDataString(token)}";
     }
 
     private static Conversation CreateChannel(

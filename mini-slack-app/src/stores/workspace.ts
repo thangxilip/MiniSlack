@@ -1,15 +1,23 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  acceptWorkspaceInvite,
+  createWorkspaceInvite,
   createWorkspaceConversation,
   createConversationMessage,
   getConversationMessages,
   getWorkspaceConversations,
+  getWorkspaceInvites,
   getWorkspaceMembers,
   getWorkspaces,
+  removeWorkspaceMember,
+  revokeWorkspaceInvite,
   startWorkspaceDirectMessage,
+  updateWorkspaceMemberRole,
+  type CreatedWorkspaceInviteSummary,
   type ConversationSummary,
   type MessageSummary,
+  type WorkspaceInviteSummary,
   type WorkspaceMemberSummary,
   type WorkspaceSummary,
 } from '@/lib/workspace-api'
@@ -68,12 +76,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const conversations = ref<ConversationSummary[]>([])
   const messages = ref<MessageSummary[]>([])
   const members = ref<WorkspaceMemberSummary[]>([])
+  const invites = ref<WorkspaceInviteSummary[]>([])
   const activeWorkspaceId = ref<string | null>(null)
   const activeConversationId = ref<string | null>(null)
   const loading = ref(false)
   const loadingMessages = ref(false)
   const loadingMembers = ref(false)
+  const loadingInvites = ref(false)
   const creatingChannel = ref(false)
+  const creatingInvite = ref(false)
+  const managingMember = ref(false)
   const startingDirectMessage = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
@@ -157,6 +169,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })),
   )
 
+  const pendingInvites = computed(() =>
+    invites.value.filter((invite) => !invite.acceptedAtUtc && !invite.revokedAtUtc),
+  )
+
   const activeTypingUsers = computed<TypingUser[]>(() => {
     if (!activeConversationId.value) {
       return []
@@ -179,12 +195,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       } else {
         conversations.value = []
         messages.value = []
+        invites.value = []
         activeConversationId.value = null
       }
     } catch {
       error.value = 'Unable to load workspace data.'
       conversations.value = []
       messages.value = []
+      invites.value = []
     } finally {
       loading.value = false
     }
@@ -193,6 +211,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function loadConversations(accessToken: string, workspaceId: string) {
     conversations.value = await getWorkspaceConversations(accessToken, workspaceId)
     await loadMembers(accessToken, workspaceId)
+    await loadInvites(accessToken, workspaceId)
     activeConversationId.value = resolveConversationId(activeConversationId.value)
 
     if (activeConversationId.value) {
@@ -212,6 +231,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       members.value = []
     } finally {
       loadingMembers.value = false
+    }
+  }
+
+  async function loadInvites(accessToken: string, workspaceId: string) {
+    loadingInvites.value = true
+
+    try {
+      invites.value = await getWorkspaceInvites(accessToken, workspaceId)
+    } catch {
+      invites.value = []
+    } finally {
+      loadingInvites.value = false
     }
   }
 
@@ -291,6 +322,119 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     } finally {
       creatingChannel.value = false
+    }
+  }
+
+  async function createInvite(
+    accessToken: string,
+    request: {
+      email: string
+      role: WorkspaceSummary['role']
+    },
+  ): Promise<CreatedWorkspaceInviteSummary | null> {
+    const workspaceId = activeWorkspaceId.value
+    if (!workspaceId || !request.email.trim()) {
+      return null
+    }
+
+    creatingInvite.value = true
+    error.value = null
+
+    try {
+      const invite = await createWorkspaceInvite(accessToken, workspaceId, {
+        email: request.email.trim(),
+        role: request.role,
+      })
+      invites.value = [invite, ...invites.value]
+      return invite
+    } catch {
+      error.value = 'Unable to create invite.'
+      return null
+    } finally {
+      creatingInvite.value = false
+    }
+  }
+
+  async function revokeInvite(accessToken: string, inviteId: string) {
+    const workspaceId = activeWorkspaceId.value
+    if (!workspaceId) {
+      return false
+    }
+
+    try {
+      await revokeWorkspaceInvite(accessToken, workspaceId, inviteId)
+      const revokedAtUtc = new Date().toISOString()
+      invites.value = invites.value.map((invite) =>
+        invite.id === inviteId ? { ...invite, revokedAtUtc } : invite,
+      )
+      return true
+    } catch {
+      error.value = 'Unable to revoke invite.'
+      return false
+    }
+  }
+
+  async function acceptInvite(accessToken: string, token: string) {
+    error.value = null
+
+    try {
+      const result = await acceptWorkspaceInvite(accessToken, token)
+      const exists = workspaces.value.some((workspace) => workspace.id === result.workspace.id)
+      workspaces.value = exists
+        ? workspaces.value.map((workspace) =>
+            workspace.id === result.workspace.id ? result.workspace : workspace,
+          )
+        : [...workspaces.value, result.workspace]
+      return result
+    } catch {
+      error.value = 'Unable to accept invite.'
+      return null
+    }
+  }
+
+  async function removeMember(accessToken: string, targetUserId: string) {
+    const workspaceId = activeWorkspaceId.value
+    if (!workspaceId) {
+      return false
+    }
+
+    managingMember.value = true
+    error.value = null
+
+    try {
+      const removed = await removeWorkspaceMember(accessToken, workspaceId, targetUserId)
+      handleWorkspaceMemberRemoved(removed)
+      return true
+    } catch {
+      error.value = 'Unable to remove member.'
+      return false
+    } finally {
+      managingMember.value = false
+    }
+  }
+
+  async function updateMemberRole(
+    accessToken: string,
+    targetUserId: string,
+    role: WorkspaceSummary['role'],
+  ) {
+    const workspaceId = activeWorkspaceId.value
+    if (!workspaceId) {
+      return false
+    }
+
+    managingMember.value = true
+    error.value = null
+
+    try {
+      const member = await updateWorkspaceMemberRole(accessToken, workspaceId, targetUserId, role)
+      upsertWorkspaceMember(member)
+      return true
+    } catch {
+      error.value = 'Unable to update member role.'
+      return false
+    } finally {
+      managingMember.value = false
     }
   }
 
@@ -393,6 +537,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             : member,
         )
       },
+      workspaceMemberAdded: upsertWorkspaceMember,
+      workspaceMemberRemoved: handleWorkspaceMemberRemoved,
+      workspaceMemberRoleChanged: upsertWorkspaceMember,
       userTyping: markUserTyping,
       userStoppedTyping: clearUserTyping,
       reconnected: joinRealtimeState,
@@ -465,6 +612,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       : [...conversations.value, conversation]
   }
 
+  function upsertWorkspaceMember(member: WorkspaceMemberSummary) {
+    const exists = members.value.some((candidate) => candidate.userId === member.userId)
+    members.value = exists
+      ? members.value.map((candidate) => (candidate.userId === member.userId ? member : candidate))
+      : [...members.value, member]
+  }
+
+  function handleWorkspaceMemberRemoved(removed: { workspaceId: string; userId: string }) {
+    if (removed.workspaceId !== activeWorkspaceId.value) {
+      return
+    }
+
+    members.value = members.value.filter((member) => member.userId !== removed.userId)
+    conversations.value = conversations.value.filter((conversation) => {
+      if (conversation.type !== 'Direct') {
+        return true
+      }
+
+      return conversation.memberCount > 1
+    })
+  }
+
   function markUserTyping(typing: TypingRealtimeDto) {
     const conversationUsers = {
       ...(typingUsersByConversation.value[typing.conversationId] ?? {}),
@@ -522,13 +691,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     conversations.value = []
     messages.value = []
     members.value = []
+    invites.value = []
     activeWorkspaceId.value = null
     activeConversationId.value = null
     error.value = null
     loading.value = false
     loadingMessages.value = false
     loadingMembers.value = false
+    loadingInvites.value = false
     creatingChannel.value = false
+    creatingInvite.value = false
+    managingMember.value = false
     startingDirectMessage.value = false
     sending.value = false
     clearTypingUsers()
@@ -561,6 +734,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     conversations,
     messages,
     members,
+    invites,
     activeWorkspaceId,
     activeConversationId,
     activeWorkspace,
@@ -568,13 +742,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeConversation,
     activeMessages,
     activeTypingUsers,
+    pendingInvites,
     workspaceMembers,
     channels,
     directMessages,
     loading,
     loadingMessages,
     loadingMembers,
+    loadingInvites,
     creatingChannel,
+    creatingInvite,
+    managingMember,
     startingDirectMessage,
     sending,
     error,
@@ -585,6 +763,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectWorkspace,
     selectConversation,
     createChannel,
+    createInvite,
+    revokeInvite,
+    acceptInvite,
+    removeMember,
+    updateMemberRole,
     startDirectMessage,
     sendMessage,
     startTyping,

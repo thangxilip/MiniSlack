@@ -1,6 +1,6 @@
 import * as signalR from '@microsoft/signalr'
 import { apiBaseUrl } from '@/lib/api-client'
-import type { ConversationSummary, MessageSummary } from '@/lib/workspace-api'
+import type { ConversationSummary, MessageSummary, WorkspaceMemberSummary } from '@/lib/workspace-api'
 
 export interface PresenceRealtimeDto {
   userId: string
@@ -17,6 +17,9 @@ export interface WorkspaceRealtimeHandlers {
   messageCreated: (message: MessageSummary) => void
   conversationCreated: (conversation: ConversationSummary) => void
   memberPresenceChanged: (presence: PresenceRealtimeDto) => void
+  workspaceMemberAdded: (member: WorkspaceMemberSummary) => void
+  workspaceMemberRemoved: (member: { workspaceId: string; userId: string }) => void
+  workspaceMemberRoleChanged: (member: WorkspaceMemberSummary) => void
   userTyping: (typing: TypingRealtimeDto) => void
   userStoppedTyping: (typing: TypingRealtimeDto) => void
   reconnected: () => void | Promise<void>
@@ -49,6 +52,9 @@ export function createWorkspaceRealtimeClient(
   connection.on('MessageCreated', handlers.messageCreated)
   connection.on('ConversationCreated', handlers.conversationCreated)
   connection.on('MemberPresenceChanged', handlers.memberPresenceChanged)
+  connection.on('WorkspaceMemberAdded', handlers.workspaceMemberAdded)
+  connection.on('WorkspaceMemberRemoved', handlers.workspaceMemberRemoved)
+  connection.on('WorkspaceMemberRoleChanged', handlers.workspaceMemberRoleChanged)
   connection.on('UserTyping', handlers.userTyping)
   connection.on('UserStoppedTyping', handlers.userStoppedTyping)
   connection.onreconnected(() => {

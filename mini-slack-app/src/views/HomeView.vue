@@ -9,6 +9,7 @@ import WorkspaceSidebar from '@/components/dashboard/WorkspaceSidebar.vue'
 import Button from '@/components/ui/Button.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkspaceStore } from '@/stores/workspace'
+import type { CreatedWorkspaceInviteSummary, WorkspaceSummary } from '@/lib/workspace-api'
 
 const auth = useAuthStore()
 const workspace = useWorkspaceStore()
@@ -102,6 +103,42 @@ async function startDirectMessage(userId: string) {
   }
 }
 
+async function createInvite(
+  payload: { email: string; role: WorkspaceSummary['role'] },
+  done: (invite: CreatedWorkspaceInviteSummary | null) => void,
+) {
+  if (!auth.accessToken) {
+    done(null)
+    return
+  }
+
+  done(await workspace.createInvite(auth.accessToken, payload))
+}
+
+async function revokeInvite(inviteId: string) {
+  if (!auth.accessToken) {
+    return
+  }
+
+  await workspace.revokeInvite(auth.accessToken, inviteId)
+}
+
+async function updateMemberRole(userId: string, role: WorkspaceSummary['role']) {
+  if (!auth.accessToken) {
+    return
+  }
+
+  await workspace.updateMemberRole(auth.accessToken, userId, role)
+}
+
+async function removeMember(userId: string) {
+  if (!auth.accessToken) {
+    return
+  }
+
+  await workspace.removeMember(auth.accessToken, userId)
+}
+
 async function logout() {
   await workspace.disconnectRealtime()
   await auth.logout()
@@ -191,11 +228,20 @@ async function logout() {
           :direct-message-count="workspace.directMessages.length"
           :message-count="workspace.messages.length"
           :members="workspace.workspaceMembers"
+          :invites="workspace.pendingInvites"
           :loading-members="workspace.loadingMembers"
+          :loading-invites="workspace.loadingInvites"
           :current-user-id="auth.user?.id ?? ''"
+          :current-user-role="workspace.activeWorkspace?.role"
+          :creating-invite="workspace.creatingInvite"
+          :managing-member="workspace.managingMember"
           :starting-direct-message="workspace.startingDirectMessage"
           :open="detailsOpen"
           @start-direct-message="startDirectMessage"
+          @create-invite="createInvite"
+          @revoke-invite="revokeInvite"
+          @update-member-role="updateMemberRole"
+          @remove-member="removeMember"
           @close="detailsOpen = false"
         />
       </div>

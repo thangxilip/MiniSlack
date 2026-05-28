@@ -17,4 +17,6 @@ public sealed class Workspace : BaseEntity
     public ICollection<WorkspaceMember> Members { get; set; } = [];
 
     public ICollection<Conversation> Conversations { get; set; } = [];
+
+    public ICollection<WorkspaceInvite> Invites { get; set; } = [];
 }

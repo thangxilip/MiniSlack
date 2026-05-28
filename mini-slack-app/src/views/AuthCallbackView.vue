@@ -6,11 +6,18 @@ import { useAuthStore } from '@/stores/auth'
 const router = useRouter()
 const auth = useAuthStore()
 const error = ref(false)
+const pendingInviteTokenKey = 'minislack.pendingInviteToken'
 
 onMounted(async () => {
   const signedIn = await auth.refreshSession()
 
   if (signedIn) {
+    const pendingInviteToken = sessionStorage.getItem(pendingInviteTokenKey)
+    if (pendingInviteToken) {
+      await router.replace({ name: 'accept-invite', query: { token: pendingInviteToken } })
+      return
+    }
+
     await router.replace({ name: 'home' })
     return
   }

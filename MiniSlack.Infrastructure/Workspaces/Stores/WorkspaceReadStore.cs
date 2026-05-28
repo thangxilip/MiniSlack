@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MiniSlack.Application.Workspaces;
 using MiniSlack.Application.Workspaces.Abstractions;
+using MiniSlack.Domain.Workspaces;
 using MiniSlack.Infrastructure.Persistence;
 
 namespace MiniSlack.Infrastructure.Workspaces.Stores;
@@ -80,6 +81,31 @@ public sealed class WorkspaceReadStore : IWorkspaceReadStore
                 member.User.Status,
                 member.Role,
                 member.JoinedAtUtc))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<WorkspaceInviteSummary>> GetWorkspaceInvitesAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        await EnsureWorkspaceAdminAsync(userId, workspaceId, cancellationToken);
+
+        return await _dbContext.WorkspaceInvites
+            .AsNoTracking()
+            .Where(invite => invite.WorkspaceId == workspaceId)
+            .OrderByDescending(invite => invite.CreatedAtUtc)
+            .Select(invite => new WorkspaceInviteSummary(
+                invite.Id,
+                invite.WorkspaceId,
+                invite.Email,
+                invite.Role,
+                invite.InvitedByUserId,
+                invite.InvitedByUser!.DisplayName,
+                invite.ExpiresAtUtc,
+                invite.AcceptedAtUtc,
+                invite.RevokedAtUtc,
+                invite.CreatedAtUtc))
             .ToListAsync(cancellationToken);
     }
 
@@ -175,6 +201,22 @@ public sealed class WorkspaceReadStore : IWorkspaceReadStore
         if (!isMember)
         {
             throw new UnauthorizedAccessException("You do not have access to this workspace.");
+        }
+    }
+
+    private async Task EnsureWorkspaceAdminAsync(
+        Guid userId,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var role = await _dbContext.WorkspaceMembers
+            .Where(member => member.WorkspaceId == workspaceId && member.UserId == userId)
+            .Select(member => (WorkspaceMemberRole?)member.Role)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (role is not (WorkspaceMemberRole.Admin or WorkspaceMemberRole.Owner))
+        {
+            throw new UnauthorizedAccessException("You do not have access to manage this workspace.");
         }
     }
 

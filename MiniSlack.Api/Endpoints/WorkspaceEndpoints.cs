@@ -2,15 +2,23 @@ using System.Security.Claims;
 using MediatR;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using MiniSlack.Application.Workspaces;
+using MiniSlack.Application.Workspaces.Commands.AcceptWorkspaceInvite;
 using MiniSlack.Application.Workspaces.Commands.CreateConversation;
 using MiniSlack.Application.Workspaces.Commands.CreateMessage;
 using MiniSlack.Application.Workspaces.Commands.CreateWorkspace;
+using MiniSlack.Application.Workspaces.Commands.CreateWorkspaceInvite;
+using MiniSlack.Application.Workspaces.Commands.RemoveWorkspaceMember;
+using MiniSlack.Application.Workspaces.Commands.RevokeWorkspaceInvite;
 using MiniSlack.Application.Workspaces.Commands.StartDirectMessage;
+using MiniSlack.Application.Workspaces.Commands.UpdateWorkspaceMemberRole;
 using MiniSlack.Application.Workspaces.Queries.GetConversations;
 using MiniSlack.Application.Workspaces.Queries.GetMessages;
+using MiniSlack.Application.Workspaces.Queries.GetWorkspaceInvites;
 using MiniSlack.Application.Workspaces.Queries.GetWorkspaceMembers;
 using MiniSlack.Application.Workspaces.Queries.GetWorkspaces;
+using MiniSlack.Infrastructure.Auth;
 
 namespace MiniSlack.Endpoints;
 
@@ -38,12 +46,38 @@ public static class WorkspaceEndpoints
             .WithName("GetWorkspaceMembers")
             .WithOpenApi();
 
+        workspaces.MapGet("/{workspaceId:guid}/invites", GetWorkspaceInvitesAsync)
+            .WithName("GetWorkspaceInvites")
+            .WithOpenApi();
+
         workspaces.MapPost("/{workspaceId:guid}/conversations", CreateConversationAsync)
             .WithName("CreateWorkspaceConversation")
             .WithOpenApi();
 
+        workspaces.MapPost("/{workspaceId:guid}/invites", CreateWorkspaceInviteAsync)
+            .WithName("CreateWorkspaceInvite")
+            .WithOpenApi();
+
         workspaces.MapPost("/{workspaceId:guid}/direct-messages", StartDirectMessageAsync)
             .WithName("StartWorkspaceDirectMessage")
+            .WithOpenApi();
+
+        workspaces.MapDelete("/{workspaceId:guid}/invites/{inviteId:guid}", RevokeWorkspaceInviteAsync)
+            .WithName("RevokeWorkspaceInvite")
+            .WithOpenApi();
+
+        workspaces.MapDelete("/{workspaceId:guid}/members/{targetUserId:guid}", RemoveWorkspaceMemberAsync)
+            .WithName("RemoveWorkspaceMember")
+            .WithOpenApi();
+
+        workspaces.MapPatch("/{workspaceId:guid}/members/{targetUserId:guid}/role", UpdateWorkspaceMemberRoleAsync)
+            .WithName("UpdateWorkspaceMemberRole")
+            .WithOpenApi();
+
+        app.MapPost("/workspace-invites/accept", AcceptWorkspaceInviteAsync)
+            .RequireAuthorization()
+            .WithTags("Workspace Invites")
+            .WithName("AcceptWorkspaceInvite")
             .WithOpenApi();
 
         var conversations = app.MapGroup("/conversations")
@@ -141,6 +175,28 @@ public static class WorkspaceEndpoints
         }
     }
 
+    private static async Task<Results<Ok<IReadOnlyList<WorkspaceInviteSummary>>, NotFound, UnauthorizedHttpResult>> GetWorkspaceInvitesAsync(
+        Guid workspaceId,
+        ClaimsPrincipal user,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var invites = await sender.Send(new GetWorkspaceInvitesQuery(userId, workspaceId), cancellationToken);
+            return TypedResults.Ok(invites);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
     private static async Task<Results<Created<ConversationSummary>, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> CreateConversationAsync(
         Guid workspaceId,
         ClaimsPrincipal user,
@@ -159,6 +215,45 @@ public static class WorkspaceEndpoints
                 new CreateConversationCommand(userId, workspaceId, request),
                 cancellationToken);
             return TypedResults.Created($"/conversations/{conversation.Id}", conversation);
+        }
+        catch (ArgumentException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
+    private static async Task<Results<Created<CreatedWorkspaceInviteSummary>, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> CreateWorkspaceInviteAsync(
+        Guid workspaceId,
+        ClaimsPrincipal user,
+        CreateWorkspaceInviteRequest request,
+        ISender sender,
+        IOptions<AuthOptions> options,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var invite = await sender.Send(
+                new CreateWorkspaceInviteCommand(
+                    userId,
+                    workspaceId,
+                    request,
+                    BuildFrontendInviteAcceptUrl(options.Value)),
+                cancellationToken);
+
+            return TypedResults.Created($"/workspaces/{workspaceId}/invites/{invite.Id}", invite);
         }
         catch (ArgumentException exception)
         {
@@ -196,6 +291,120 @@ public static class WorkspaceEndpoints
         catch (ArgumentException exception)
         {
             return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
+    private static async Task<Results<Ok<AcceptWorkspaceInviteResult>, BadRequest<ProblemDetails>, UnauthorizedHttpResult>> AcceptWorkspaceInviteAsync(
+        ClaimsPrincipal user,
+        AcceptWorkspaceInviteRequest request,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var result = await sender.Send(new AcceptWorkspaceInviteCommand(userId, request), cancellationToken);
+            return TypedResults.Ok(result);
+        }
+        catch (ArgumentException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+    }
+
+    private static async Task<Results<NoContent, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> RevokeWorkspaceInviteAsync(
+        Guid workspaceId,
+        Guid inviteId,
+        ClaimsPrincipal user,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            await sender.Send(new RevokeWorkspaceInviteCommand(userId, workspaceId, inviteId), cancellationToken);
+            return TypedResults.NoContent();
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
+    private static async Task<Results<Ok<RemovedWorkspaceMemberSummary>, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> RemoveWorkspaceMemberAsync(
+        Guid workspaceId,
+        Guid targetUserId,
+        ClaimsPrincipal user,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var removed = await sender.Send(
+                new RemoveWorkspaceMemberCommand(userId, workspaceId, targetUserId),
+                cancellationToken);
+
+            return TypedResults.Ok(removed);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return TypedResults.BadRequest(CreateProblem(exception.Message));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.NotFound();
+        }
+    }
+
+    private static async Task<Results<Ok<WorkspaceMemberSummary>, BadRequest<ProblemDetails>, NotFound, UnauthorizedHttpResult>> UpdateWorkspaceMemberRoleAsync(
+        Guid workspaceId,
+        Guid targetUserId,
+        ClaimsPrincipal user,
+        UpdateWorkspaceMemberRoleRequest request,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(user, out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var member = await sender.Send(
+                new UpdateWorkspaceMemberRoleCommand(userId, workspaceId, targetUserId, request),
+                cancellationToken);
+
+            return TypedResults.Ok(member);
         }
         catch (InvalidOperationException exception)
         {
@@ -287,5 +496,11 @@ public static class WorkspaceEndpoints
             Detail = detail,
             Status = StatusCodes.Status400BadRequest
         };
+    }
+
+    private static string BuildFrontendInviteAcceptUrl(AuthOptions options)
+    {
+        var callbackUri = new Uri(options.Frontend.LoginCallbackUrl);
+        return $"{callbackUri.Scheme}://{callbackUri.Authority}/invites/accept";
     }
 }

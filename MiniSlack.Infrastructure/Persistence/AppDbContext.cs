@@ -27,6 +27,8 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<WorkspaceMember> WorkspaceMembers => Set<WorkspaceMember>();
 
+    public DbSet<WorkspaceInvite> WorkspaceInvites => Set<WorkspaceInvite>();
+
     public DbSet<Conversation> Conversations => Set<Conversation>();
 
     public DbSet<ConversationMember> ConversationMembers => Set<ConversationMember>();

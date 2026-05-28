@@ -11,6 +11,12 @@ public interface IWorkspaceClient
 
     Task MemberPresenceChanged(PresenceRealtimeDto presence);
 
+    Task WorkspaceMemberAdded(WorkspaceMemberSummary member);
+
+    Task WorkspaceMemberRemoved(RemovedWorkspaceMemberSummary member);
+
+    Task WorkspaceMemberRoleChanged(WorkspaceMemberSummary member);
+
     Task UserTyping(TypingRealtimeDto typing);
 
     Task UserStoppedTyping(TypingRealtimeDto typing);

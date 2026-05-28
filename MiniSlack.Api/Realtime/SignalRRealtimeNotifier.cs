@@ -44,4 +44,37 @@ public sealed class SignalRRealtimeNotifier : IRealtimeNotifier
             .Groups(userGroups)
             .ConversationCreated(conversation);
     }
+
+    public Task WorkspaceMemberAddedAsync(
+        WorkspaceMemberSummary member,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        return _hubContext.Clients
+            .Group(RealtimeGroups.Workspace(workspaceId))
+            .WorkspaceMemberAdded(member);
+    }
+
+    public async Task WorkspaceMemberRemovedAsync(
+        RemovedWorkspaceMemberSummary member,
+        CancellationToken cancellationToken)
+    {
+        await _hubContext.Clients
+            .Group(RealtimeGroups.Workspace(member.WorkspaceId))
+            .WorkspaceMemberRemoved(member);
+
+        await _hubContext.Clients
+            .Group(RealtimeGroups.User(member.UserId))
+            .WorkspaceMemberRemoved(member);
+    }
+
+    public Task WorkspaceMemberRoleChangedAsync(
+        WorkspaceMemberSummary member,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        return _hubContext.Clients
+            .Group(RealtimeGroups.Workspace(workspaceId))
+            .WorkspaceMemberRoleChanged(member);
+    }
 }

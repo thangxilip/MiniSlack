@@ -185,16 +185,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/weatherforecast": {
+    "/workspace-invites/accept": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["GetWeatherForecast"];
+        get?: never;
         put?: never;
-        post?: never;
+        post: operations["AcceptWorkspaceInvite"];
         delete?: never;
         options?: never;
         head?: never;
@@ -249,6 +249,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspaceId}/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["GetWorkspaceInvites"];
+        put?: never;
+        post: operations["CreateWorkspaceInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspaceId}/direct-messages": {
         parameters: {
             query?: never;
@@ -265,10 +281,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspaceId}/invites/{inviteId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["RevokeWorkspaceInvite"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspaceId}/members/{targetUserId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["RemoveWorkspaceMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspaceId}/members/{targetUserId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["UpdateWorkspaceMemberRole"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptWorkspaceInviteRequest: {
+            token?: string | null;
+        };
+        AcceptWorkspaceInviteResult: {
+            workspace?: components["schemas"]["WorkspaceSummary"];
+            member?: components["schemas"]["WorkspaceMemberSummary"];
+        };
         ConversationSummary: {
             /** Format: uuid */
             id?: string;
@@ -299,8 +370,29 @@ export interface components {
             /** Format: uuid */
             parentMessageId?: string | null;
         };
+        CreateWorkspaceInviteRequest: {
+            email?: string | null;
+            role?: components["schemas"]["WorkspaceMemberRole"];
+        };
         CreateWorkspaceRequest: {
             name?: string | null;
+        };
+        CreatedWorkspaceInviteSummary: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            workspaceId?: string;
+            email?: string | null;
+            role?: components["schemas"]["WorkspaceMemberRole"];
+            /** Format: uuid */
+            invitedByUserId?: string;
+            invitedByDisplayName?: string | null;
+            /** Format: date-time */
+            expiresAtUtc?: string;
+            /** Format: date-time */
+            createdAtUtc?: string;
+            token?: string | null;
+            acceptUrl?: string | null;
         };
         MessageSummary: {
             /** Format: uuid */
@@ -333,18 +425,37 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        RemovedWorkspaceMemberSummary: {
+            /** Format: uuid */
+            workspaceId?: string;
+            /** Format: uuid */
+            userId?: string;
+        };
         StartDirectMessageRequest: {
             /** Format: uuid */
             targetUserId?: string;
         };
-        WeatherForecast: {
-            /** Format: date */
-            date?: string;
-            /** Format: int32 */
-            temperatureC?: number;
-            summary?: string | null;
-            /** Format: int32 */
-            readonly temperatureF?: number;
+        UpdateWorkspaceMemberRoleRequest: {
+            role?: components["schemas"]["WorkspaceMemberRole"];
+        };
+        WorkspaceInviteSummary: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            workspaceId?: string;
+            email?: string | null;
+            role?: components["schemas"]["WorkspaceMemberRole"];
+            /** Format: uuid */
+            invitedByUserId?: string;
+            invitedByDisplayName?: string | null;
+            /** Format: date-time */
+            expiresAtUtc?: string;
+            /** Format: date-time */
+            acceptedAtUtc?: string | null;
+            /** Format: date-time */
+            revokedAtUtc?: string | null;
+            /** Format: date-time */
+            createdAtUtc?: string;
         };
         /**
          * Format: int32
@@ -452,14 +563,18 @@ export interface operations {
             };
         };
     };
-    GetWeatherForecast: {
+    AcceptWorkspaceInvite: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptWorkspaceInviteRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -467,7 +582,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherForecast"][];
+                    "application/json": components["schemas"]["AcceptWorkspaceInviteResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -625,6 +749,77 @@ export interface operations {
             };
         };
     };
+    GetWorkspaceInvites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInviteSummary"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CreateWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkspaceInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedWorkspaceInviteSummary"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     StartWorkspaceDirectMessage: {
         parameters: {
             query?: never;
@@ -647,6 +842,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationSummary"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RevokeWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+                inviteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RemoveWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+                targetUserId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemovedWorkspaceMemberSummary"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    UpdateWorkspaceMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+                targetUserId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkspaceMemberRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberSummary"];
                 };
             };
             /** @description Bad Request */
